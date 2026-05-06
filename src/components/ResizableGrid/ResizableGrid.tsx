@@ -1,56 +1,53 @@
 import { useRef, useState, useLayoutEffect, useEffect } from 'react'
-import type { MutableRefObject, PointerEvent as RPointerEvent } from 'react'
-import { ShaderCanvas } from './ShaderCanvas'
+import type { PointerEvent as RPointerEvent } from 'react'
 import { applyAxisPixelDelta, renormalizeToSum, enforceTrackBounds } from './trackMath'
-import type { LayoutCellDef, SceneData, CellRect } from '../../types/grid'
+import type { LayoutCellDef } from '../../types/grid'
 import './ResizableGrid.css'
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const ROWS = 3
-const COLS = 3
 const MIN_TRACK_PX = 60
-const MAX_TRACK_FRACTION = 0.78
+const MAX_TRACK_FRACTION = 0.5
 
-/**
- * Asymmetric 3×3 layout:
- *  ┌──────────────┬───────┐
- *  │  0-0 (2×2)   │  0-2  │
- *  │              ├───────┤
- *  │              │  1-2  │
- *  ├───────┬──────┴───────┤  ← wrong: let me redo
- *  │  2-0  │  2-1  │  2-2 │
- *  └───────┴───────┴──────┘
- */
-const LAYOUT: LayoutCellDef[] = [
-  { id: '0-0', row: 0, col: 0, rowSpan: 2, colSpan: 2, type: 'super' },
-  { id: '0-2', row: 0, col: 2, rowSpan: 1, colSpan: 1, type: 'super' },
-  { id: '1-2', row: 1, col: 2, rowSpan: 1, colSpan: 1, type: 'super' },
-  { id: '2-0', row: 2, col: 0, rowSpan: 1, colSpan: 1, type: 'super' },
-  { id: '2-1', row: 2, col: 1, rowSpan: 1, colSpan: 1, type: 'super' },
-  { id: '2-2', row: 2, col: 2, rowSpan: 1, colSpan: 1, type: 'super' },
-]
+type Preset = {
+  name: string
+  rows: number
+  cols: number
+  cells: Array<LayoutCellDef & { microCount?: 2 | 3; microSplit?: 'h' | 'v' }>
+}
+
+const PRESET_FIXED: Preset = {
+  name: 'Fixed',
+  rows: 4,
+  cols: 4,
+  cells: [
+    { id: '0-0', row: 0, col: 0, rowSpan: 1, colSpan: 1, type: 'normal' },
+    { id: '0-1', row: 0, col: 1, rowSpan: 1, colSpan: 3, type: 'super' },
+    { id: '1-0', row: 1, col: 0, rowSpan: 2, colSpan: 1, type: 'super' },
+    { id: '1-1', row: 1, col: 1, rowSpan: 2, colSpan: 2, type: 'super' },
+    { id: '1-3', row: 1, col: 3, rowSpan: 1, colSpan: 1, type: 'normal' },
+    { id: '2-3', row: 2, col: 3, rowSpan: 1, colSpan: 1, type: 'normal' },
+    { id: '3-0', row: 3, col: 0, rowSpan: 1, colSpan: 1, type: 'normal' },
+    { id: '3-1', row: 3, col: 1, rowSpan: 1, colSpan: 1, type: 'micro', microCount: 2, microSplit: 'h' },
+    { id: '3-2', row: 3, col: 2, rowSpan: 1, colSpan: 1, type: 'normal' },
+    { id: '3-3', row: 3, col: 3, rowSpan: 1, colSpan: 1, type: 'micro', microCount: 2, microSplit: 'v' },
+  ],
+}
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 interface DragState {
-  axis: 'col' | 'row'
-  seamIdx: number
+  kind: 'col' | 'row' | 'corner'
+  colIdx?: number
+  rowIdx?: number
   startPx: number
+  startY?: number
   startTracksPx: number[]
-}
-
-function initSceneData(): SceneData {
-  return {
-    cellRects: new Map<string, CellRect>(),
-    containerRects: new Map<string, CellRect>(),
-    lightPos: { x: -1, y: -1 },
-    pointerOverSurface: false,
-  }
+  startRowsPx?: number[]
 }
 
 // ---------------------------------------------------------------------------
@@ -58,9 +55,13 @@ function initSceneData(): SceneData {
 // ---------------------------------------------------------------------------
 
 export function ResizableGrid() {
+  const layout = PRESET_FIXED
+  const ROWS = layout.rows
+  const COLS = layout.cols
+
   // Track fractions (normalised, sum ≈ 1).
-  const [colFracs, setColFracs] = useState<number[]>([0.38, 0.27, 0.35])
-  const [rowFracs, setRowFracs] = useState<number[]>([0.37, 0.33, 0.30])
+  const [colFracs, setColFracs] = useState<number[]>(Array.from({ length: COLS }, () => 1 / COLS))
+  const [rowFracs, setRowFracs] = useState<number[]>(Array.from({ length: ROWS }, () => 1 / ROWS))
 
   // Container size — triggers re-measurement when it changes.
   const [box, setBox] = useState({ w: 0, h: 0 })
@@ -72,9 +73,6 @@ export function ResizableGrid() {
   // DOM refs
   const rootRef = useRef<HTMLDivElement>(null)
   const cellsRef = useRef<HTMLDivElement>(null)
-
-  // Shared scene data read by the p5 sketch each frame (no re-renders).
-  const dataRef = useRef<SceneData>(initSceneData()) as MutableRefObject<SceneData>
 
   // Active drag state (stored in ref to avoid re-renders during pointermove).
   const dragRef = useRef<DragState | null>(null)
@@ -98,10 +96,7 @@ export function ResizableGrid() {
   }, [])
 
   // -------------------------------------------------------------------------
-  // Measurement loop — runs after every layout change.
-  //
-  // Reads the DOM to populate dataRef (for p5) and split handle positions
-  // (for React). Runs in useLayoutEffect so values are ready before paint.
+  // Measurement loop — tracks split handle seam positions.
   // -------------------------------------------------------------------------
   useLayoutEffect(() => {
     const root = rootRef.current
@@ -110,42 +105,11 @@ export function ResizableGrid() {
 
     const rootRect = root.getBoundingClientRect()
 
-    // --- Cell / container rects for the shader ---
-    const newCellRects = new Map<string, CellRect>()
-    const newContainerRects = new Map<string, CellRect>()
-
-    for (const cell of LAYOUT) {
-      if (cell.type === 'empty') continue
-      const cellEl = cellsEl.querySelector<HTMLElement>(`[data-cell-id="${cell.id}"]`)
-      if (!cellEl) continue
-
-      const cr = cellEl.getBoundingClientRect()
-      newCellRects.set(cell.id, {
-        x: cr.left - rootRect.left,
-        y: cr.top - rootRect.top,
-        w: cr.width,
-        h: cr.height,
-      })
-
-      // Measure the inner surface — the authoritative rect the shader draws into.
-      const surfaceEl = cellEl.querySelector<HTMLElement>('.resizable-grid__cell-surface')
-      const sr = (surfaceEl ?? cellEl).getBoundingClientRect()
-      newContainerRects.set(cell.id, {
-        x: sr.left - rootRect.left,
-        y: sr.top - rootRect.top,
-        w: sr.width,
-        h: sr.height,
-      })
-    }
-
-    dataRef.current.cellRects = newCellRects
-    dataRef.current.containerRects = newContainerRects
-
     // --- Split handle positions (measured from seam cell edges) ---
     const newSplitV: number[] = []
     for (let i = 0; i < COLS - 1; i++) {
       // Find a non-spanning, non-empty cell at this column that we can measure.
-      const seam = LAYOUT.find(c => c.col === i && c.colSpan === 1 && c.type !== 'empty')
+      const seam = layout.cells.find(c => c.col === i && c.colSpan === 1 && c.type !== 'empty')
       const seamEl = seam
         ? cellsEl.querySelector<HTMLElement>(`[data-cell-id="${seam.id}"]`)
         : null
@@ -160,7 +124,7 @@ export function ResizableGrid() {
 
     const newSplitH: number[] = []
     for (let i = 0; i < ROWS - 1; i++) {
-      const seam = LAYOUT.find(c => c.row === i && c.rowSpan === 1 && c.type !== 'empty')
+      const seam = layout.cells.find(c => c.row === i && c.rowSpan === 1 && c.type !== 'empty')
       const seamEl = seam
         ? cellsEl.querySelector<HTMLElement>(`[data-cell-id="${seam.id}"]`)
         : null
@@ -174,24 +138,7 @@ export function ResizableGrid() {
 
     setSplitV(newSplitV)
     setSplitH(newSplitH)
-  }, [colFracs, rowFracs, box])
-
-  // -------------------------------------------------------------------------
-  // Pointer routing
-  // -------------------------------------------------------------------------
-  function handleRootPointerMove(e: RPointerEvent<HTMLDivElement>) {
-    const root = rootRef.current
-    if (!root) return
-    const rect = root.getBoundingClientRect()
-    dataRef.current.lightPos = {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    }
-  }
-
-  function handleRootPointerLeave() {
-    dataRef.current.lightPos = { x: -1, y: -1 }
-  }
+  }, [colFracs, rowFracs, box, COLS, ROWS, layout.cells])
 
   // -------------------------------------------------------------------------
   // Drag-to-resize
@@ -206,19 +153,32 @@ export function ResizableGrid() {
     if (!root) return
     const total = axis === 'col' ? root.clientWidth : root.clientHeight
     const fracs = axis === 'col' ? colFracs : rowFracs
-    dragRef.current = {
-      axis,
-      seamIdx,
-      startPx: axis === 'col' ? e.clientX : e.clientY,
-      startTracksPx: fracs.map(f => f * total),
+    if (axis === 'col') {
+      dragRef.current = {
+        kind: 'col',
+        colIdx: seamIdx,
+        startPx: e.clientX,
+        startTracksPx: fracs.map(f => f * total),
+      }
+    } else {
+      dragRef.current = {
+        kind: 'row',
+        rowIdx: seamIdx,
+        startPx: e.clientY,
+        startTracksPx: fracs.map(f => f * total),
+      }
     }
   }
 
   function moveDrag(e: RPointerEvent<HTMLButtonElement>, axis: 'col' | 'row', seamIdx: number) {
     const drag = dragRef.current
-    if (!drag || drag.axis !== axis || drag.seamIdx !== seamIdx) return
+    if (!drag) return
     const root = rootRef.current
     if (!root) return
+
+    const isCol = drag.kind === 'col' && axis === 'col' && drag.colIdx === seamIdx
+    const isRow = drag.kind === 'row' && axis === 'row' && drag.rowIdx === seamIdx
+    if (!isCol && !isRow) return
 
     const total = axis === 'col' ? root.clientWidth : root.clientHeight
     const cursor = axis === 'col' ? e.clientX : e.clientY
@@ -226,7 +186,7 @@ export function ResizableGrid() {
 
     const newPx = enforceTrackBounds(
       renormalizeToSum(
-        applyAxisPixelDelta([...drag.startTracksPx], drag.seamIdx, delta, MIN_TRACK_PX),
+        applyAxisPixelDelta([...drag.startTracksPx], seamIdx, delta, MIN_TRACK_PX),
         total,
       ),
       total,
@@ -239,8 +199,59 @@ export function ResizableGrid() {
     else setRowFracs(newFracs)
   }
 
+  function startCornerDrag(e: RPointerEvent<HTMLButtonElement>, colIdx: number, rowIdx: number) {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    const root = rootRef.current
+    if (!root) return
+    dragRef.current = {
+      kind: 'corner',
+      colIdx,
+      rowIdx,
+      startPx: e.clientX,
+      startY: e.clientY,
+      startTracksPx: colFracs.map(f => f * root.clientWidth),
+      startRowsPx: rowFracs.map(f => f * root.clientHeight),
+    }
+  }
+
+  function moveCornerDrag(e: RPointerEvent<HTMLButtonElement>, colIdx: number, rowIdx: number) {
+    const drag = dragRef.current
+    const root = rootRef.current
+    if (!drag || !root) return
+    if (drag.kind !== 'corner' || drag.colIdx !== colIdx || drag.rowIdx !== rowIdx) return
+
+    const width = root.clientWidth
+    const height = root.clientHeight
+    const deltaX = e.clientX - drag.startPx
+    const deltaY = e.clientY - (drag.startY ?? e.clientY)
+
+    const nextCols = enforceTrackBounds(
+      renormalizeToSum(
+        applyAxisPixelDelta([...drag.startTracksPx], colIdx, deltaX, MIN_TRACK_PX),
+        width,
+      ),
+      width,
+      MIN_TRACK_PX,
+      MAX_TRACK_FRACTION,
+    )
+    const nextRows = enforceTrackBounds(
+      renormalizeToSum(
+        applyAxisPixelDelta([...(drag.startRowsPx ?? [])], rowIdx, deltaY, MIN_TRACK_PX),
+        height,
+      ),
+      height,
+      MIN_TRACK_PX,
+      MAX_TRACK_FRACTION,
+    )
+
+    setColFracs(nextCols.map(v => v / width))
+    setRowFracs(nextRows.map(v => v / height))
+  }
+
   function endDrag(e: RPointerEvent<HTMLButtonElement>) {
-    e.currentTarget.releasePointerCapture(e.pointerId)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
     dragRef.current = null
   }
 
@@ -254,19 +265,14 @@ export function ResizableGrid() {
     <div
       ref={rootRef}
       className="resizable-grid"
-      onPointerMove={handleRootPointerMove}
-      onPointerLeave={handleRootPointerLeave}
     >
-      {/* z-index 0 — p5 WebGL canvas */}
-      <ShaderCanvas dataRef={dataRef} />
-
       {/* z-index 1 — CSS grid cells (pointer-events: none on container) */}
       <div
         ref={cellsRef}
         className="resizable-grid__cells"
         style={{ gridTemplateColumns: colTemplate, gridTemplateRows: rowTemplate }}
       >
-        {LAYOUT.filter(c => c.type !== 'empty').map(cell => (
+        {layout.cells.filter(c => c.type !== 'empty').map(cell => (
           <div
             key={cell.id}
             data-cell-id={cell.id}
@@ -276,7 +282,23 @@ export function ResizableGrid() {
               gridRow: `${cell.row + 1} / span ${cell.rowSpan}`,
             }}
           >
-            <div className="resizable-grid__cell-surface" />
+            <div className="resizable-grid__cell-chrome">
+              {cell.type === 'micro' ? (
+                <div className={`resizable-grid__micro-container resizable-grid__micro--${cell.microSplit ?? 'h'}`}>
+                  {Array.from({ length: cell.microCount ?? 2 }, (_, i) => (
+                    <div key={`${cell.id}-m-${i}`} className="resizable-grid__micro-cell">
+                      <div className="resizable-grid__cell-surface">
+                        <span className="resizable-grid__cell-text">{cell.id}.{i + 1}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="resizable-grid__cell-surface">
+                  <span className="resizable-grid__cell-text">{cell.id}</span>
+                </div>
+              )}
+            </div>
           </div>
         ))}
       </div>
@@ -307,7 +329,24 @@ export function ResizableGrid() {
             aria-label={`Resize row ${i + 1}`}
           />
         ))}
+        {Array.from({ length: COLS - 1 }, (_, i) =>
+          Array.from({ length: ROWS - 1 }, (_, j) => (
+            <button
+              key={`corner-${i}-${j}`}
+              className="resizable-grid__split resizable-grid__split--corner"
+              style={{ left: splitV[i] ?? 0, top: splitH[j] ?? 0 }}
+              onPointerDown={e => startCornerDrag(e, i, j)}
+              onPointerMove={e => moveCornerDrag(e, i, j)}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              aria-label={`Resize corner ${i + 1}-${j + 1}`}
+            >
+              <span className="resizable-grid__split-plus" aria-hidden>+</span>
+            </button>
+          )),
+        )}
       </div>
+      <div className="resizable-grid__preset-badge">Preset: {layout.name}</div>
     </div>
   )
 }

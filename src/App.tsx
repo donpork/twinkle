@@ -6,7 +6,7 @@ function App() {
     <main className="app">
       <header className="intro">
         <h1>twinkle</h1>
-        <p>React + TypeScript + p5 WebGL · drag the seams to resize</p>
+        <p>Fixed preset grid with corner resize handles and pill cells</p>
       </header>
       <div className="sketch-wrap">
         <ResizableGrid />
