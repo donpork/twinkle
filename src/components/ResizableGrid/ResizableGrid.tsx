@@ -23,16 +23,7 @@ const PRESET_FIXED: Preset = {
   rows: 4,
   cols: 4,
   cells: [
-    { id: '0-0', row: 0, col: 0, rowSpan: 1, colSpan: 1, type: 'normal' },
-    { id: '0-1', row: 0, col: 1, rowSpan: 1, colSpan: 3, type: 'super' },
-    { id: '1-0', row: 1, col: 0, rowSpan: 2, colSpan: 1, type: 'super' },
     { id: '1-1', row: 1, col: 1, rowSpan: 2, colSpan: 2, type: 'super' },
-    { id: '1-3', row: 1, col: 3, rowSpan: 1, colSpan: 1, type: 'normal' },
-    { id: '2-3', row: 2, col: 3, rowSpan: 1, colSpan: 1, type: 'normal' },
-    { id: '3-0', row: 3, col: 0, rowSpan: 1, colSpan: 1, type: 'normal' },
-    { id: '3-1', row: 3, col: 1, rowSpan: 1, colSpan: 1, type: 'micro', microCount: 2, microSplit: 'h' },
-    { id: '3-2', row: 3, col: 2, rowSpan: 1, colSpan: 1, type: 'normal' },
-    { id: '3-3', row: 3, col: 3, rowSpan: 1, colSpan: 1, type: 'micro', microCount: 2, microSplit: 'v' },
   ],
 }
 
