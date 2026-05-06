@@ -1,0 +1,123 @@
+/* ---------------------------------------------------------------------------
+   Root — shared coordinate origin for all three layers.
+   --------------------------------------------------------------------------- */
+.resizable-grid {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: rgb(14, 14, 22); /* visible in gaps and before first p5 frame */
+  user-select: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Layer 0 — p5 WebGL canvas host
+   --------------------------------------------------------------------------- */
+.resizable-grid__canvas-host {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none; /* pointer falls through to cells layer */
+}
+
+.resizable-grid__canvas-host canvas {
+  display: block; /* remove inline gap */
+}
+
+/* ---------------------------------------------------------------------------
+   Layer 1 — CSS grid cells
+   --------------------------------------------------------------------------- */
+.resizable-grid__cells {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  gap: 2px;
+  pointer-events: none; /* individual cells opt back in */
+}
+
+.resizable-grid__cell {
+  overflow: hidden;
+  min-width: 0;    /* allow tracks to shrink below min-content; JS enforces floor */
+  min-height: 0;
+  pointer-events: auto;
+}
+
+.resizable-grid__cell-surface {
+  width: 100%;
+  height: 100%;
+  /* Surface is the authoritative measurement rect fed to the shader. */
+}
+
+/* ---------------------------------------------------------------------------
+   Layer 3 — drag handles
+   --------------------------------------------------------------------------- */
+.resizable-grid__splits {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none; /* individual handles opt back in */
+}
+
+.resizable-grid__split {
+  position: absolute;
+  pointer-events: auto;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Vertical handle — sits on the seam between two columns */
+.resizable-grid__split--v {
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  transform: translateX(-50%); /* centre on the measured seam pixel */
+  cursor: col-resize;
+}
+
+.resizable-grid__split--v::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 8%;
+  bottom: 8%;
+  width: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.10);
+  transition: background 0.15s ease;
+}
+
+.resizable-grid__split--v:hover::after,
+.resizable-grid__split--v:active::after {
+  background: rgba(255, 255, 255, 0.50);
+}
+
+/* Horizontal handle — sits on the seam between two rows */
+.resizable-grid__split--h {
+  left: 0;
+  right: 0;
+  height: 14px;
+  transform: translateY(-50%);
+  cursor: row-resize;
+}
+
+.resizable-grid__split--h::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: 8%;
+  right: 8%;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.10);
+  transition: background 0.15s ease;
+}
+
+.resizable-grid__split--h:hover::after,
+.resizable-grid__split--h:active::after {
+  background: rgba(255, 255, 255, 0.50);
+}
