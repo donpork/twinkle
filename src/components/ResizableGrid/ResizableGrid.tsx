@@ -1,7 +1,9 @@
-import { useRef, useState, useLayoutEffect, useEffect } from 'react'
-import type { PointerEvent as RPointerEvent } from 'react'
+import { useRef, useState, useLayoutEffect, useEffect, useCallback } from 'react'
+import type { PointerEvent as RPointerEvent, ChangeEvent } from 'react'
 import { applyAxisPixelDelta, renormalizeToSum, enforceTrackBounds } from './trackMath'
-import type { LayoutCellDef } from '../../types/grid'
+import type { LayoutCellDef, SceneData } from '../../types/grid'
+import { ShaderCanvas } from './ShaderCanvas'
+import { BoidCanvas } from './BoidCanvas'
 import './ResizableGrid.css'
 
 // ---------------------------------------------------------------------------
@@ -65,6 +67,27 @@ export function ResizableGrid() {
   const rootRef = useRef<HTMLDivElement>(null)
   const cellsRef = useRef<HTMLDivElement>(null)
 
+  // Death-distance controlled by the input overlay; synced into dataRef without re-render.
+  const [deathDist, setDeathDist] = useState(3)
+  const [minLiveBoids, setMinLiveBoids] = useState(5000)
+  const [invertSpeed, setInvertSpeed] = useState(false)
+  const [blurIntensity, setBlurIntensity] = useState(0)
+  const [showDebug, setShowDebug] = useState(false)
+
+  // Scene data shared with the p5 sketch — mutated in place, never triggers re-render.
+  const dataRef = useRef<SceneData>({
+    cellRects: new Map(),
+    containerRects: new Map(),
+    lightPos: { x: -1, y: -1 },
+    pointerOverSurface: false,
+    pointerDown: false,
+    mouseReleasedTick: 0,
+    deathDistancePx: 3,
+    minLiveBoids: 5000,
+    lastDirection: { x: 1, y: 0 },
+    invertSpeedProfile: false,
+  })
+
   // Active drag state (stored in ref to avoid re-renders during pointermove).
   const dragRef = useRef<DragState | null>(null)
 
@@ -84,6 +107,17 @@ export function ResizableGrid() {
   // Clear drag state on unmount / HMR.
   useEffect(() => {
     return () => { dragRef.current = null }
+  }, [])
+
+  // Window-level safety reset so pointerDown never stays true after a captured drag release.
+  useEffect(() => {
+    const reset = () => { dataRef.current.pointerDown = false }
+    window.addEventListener('pointerup', reset)
+    window.addEventListener('pointercancel', reset)
+    return () => {
+      window.removeEventListener('pointerup', reset)
+      window.removeEventListener('pointercancel', reset)
+    }
   }, [])
 
   // -------------------------------------------------------------------------
@@ -129,6 +163,31 @@ export function ResizableGrid() {
 
     setSplitV(newSplitV)
     setSplitH(newSplitH)
+
+    // --- Push cell and container rects into SceneData for the p5 sketch ---
+    const newCellRects = new Map<string, import('../../types/grid').CellRect>()
+    const newContainerRects = new Map<string, import('../../types/grid').CellRect>()
+    for (const cell of layout.cells.filter(c => c.type !== 'empty')) {
+      const cellEl = cellsEl.querySelector<HTMLElement>(`[data-cell-id="${cell.id}"]`)
+      if (!cellEl) continue
+      const cr = cellEl.getBoundingClientRect()
+      newCellRects.set(cell.id, {
+        x: cr.left - rootRect.left,
+        y: cr.top - rootRect.top,
+        w: cr.width,
+        h: cr.height,
+      })
+      const surfaceEl = cellEl.querySelector<HTMLElement>('.resizable-grid__cell-surface')
+      const sr = (surfaceEl ?? cellEl).getBoundingClientRect()
+      newContainerRects.set(cell.id, {
+        x: sr.left - rootRect.left,
+        y: sr.top - rootRect.top,
+        w: sr.width,
+        h: sr.height,
+      })
+    }
+    dataRef.current.cellRects = newCellRects
+    dataRef.current.containerRects = newContainerRects
   }, [colFracs, rowFracs, box, COLS, ROWS, layout.cells])
 
   // -------------------------------------------------------------------------
@@ -251,12 +310,111 @@ export function ResizableGrid() {
   // -------------------------------------------------------------------------
   const colTemplate = colFracs.map(f => `minmax(min-content, ${f}fr)`).join(' ')
   const rowTemplate = rowFracs.map(f => `minmax(min-content, ${f}fr)`).join(' ')
+  const focusRect = dataRef.current.containerRects.get('1-1') ?? null
+
+  function handlePointerMove(e: RPointerEvent<HTMLDivElement>) {
+    const root = rootRef.current
+    if (!root) return
+    const rect = root.getBoundingClientRect()
+    const lightPos = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    dataRef.current.lightPos = lightPos
+    dataRef.current.pointerOverSurface = true
+
+    const target = dataRef.current.containerRects.get('1-1')
+    if (target) {
+      const cx = target.x + target.w * 0.5
+      const cy = target.y + target.h * 0.5
+      const dx = lightPos.x - cx
+      const dy = lightPos.y - cy
+      const mag = Math.hypot(dx, dy)
+      if (mag > 1) {
+        dataRef.current.lastDirection = { x: dx / mag, y: dy / mag }
+      }
+    }
+  }
+
+  function handlePointerLeave() {
+    dataRef.current.lightPos = { x: -1, y: -1 }
+    dataRef.current.pointerOverSurface = false
+    dataRef.current.pointerDown = false
+  }
+
+  const handlePointerDown = useCallback(() => {
+    dataRef.current.pointerDown = true
+  }, [])
+
+  const handlePointerUp = useCallback(() => {
+    dataRef.current.pointerDown = false
+    dataRef.current.mouseReleasedTick++
+  }, [])
+
+  function handleDeathDistChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(0, Number(e.target.value))
+    setDeathDist(v)
+    dataRef.current.deathDistancePx = v
+  }
+
+  function handleMinLiveChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(0, Math.floor(Number(e.target.value)))
+    setMinLiveBoids(v)
+    dataRef.current.minLiveBoids = v
+  }
+
+  function handleInvertSpeedChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = e.target.checked
+    setInvertSpeed(v)
+    dataRef.current.invertSpeedProfile = v
+  }
+
+  function handleBlurIntensityChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(0, Number(e.target.value))
+    setBlurIntensity(v)
+  }
+
+  function handleShowDebugChange(e: ChangeEvent<HTMLInputElement>) {
+    setShowDebug(e.target.checked)
+  }
 
   return (
     <div
       ref={rootRef}
-      className="resizable-grid"
+      className={`resizable-grid ${showDebug ? 'resizable-grid--debug' : ''}`}
+      onPointerMove={handlePointerMove}
+      onPointerLeave={handlePointerLeave}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerLeave}
     >
+      {/* z-index 0 — p5 WEBGL canvas */}
+      <ShaderCanvas dataRef={dataRef} />
+      <BoidCanvas dataRef={dataRef} />
+      {focusRect ? (
+        <div
+          className="resizable-grid__boid-blur-layer"
+          style={{
+            left: focusRect.x,
+            top: focusRect.y,
+            width: focusRect.w,
+            height: focusRect.h,
+            backdropFilter: `blur(${blurIntensity}px)`,
+            WebkitBackdropFilter: `blur(${blurIntensity}px)`,
+          }}
+        />
+      ) : null}
+      {focusRect ? (
+        <div
+          className="resizable-grid__overlay-label"
+          style={{
+            left: focusRect.x,
+            top: focusRect.y,
+            width: focusRect.w,
+            height: focusRect.h,
+          }}
+        >
+          R1C1
+        </div>
+      ) : null}
+
       {/* z-index 1 — CSS grid cells (pointer-events: none on container) */}
       <div
         ref={cellsRef}
@@ -338,6 +496,54 @@ export function ResizableGrid() {
         )}
       </div>
       <div className="resizable-grid__preset-badge">Preset: {layout.name}</div>
+      <label className="resizable-grid__death-dist-control">
+        edge buffer
+        <input
+          type="number"
+          min={0}
+          max={300}
+          value={deathDist}
+          onChange={handleDeathDistChange}
+        />
+        px
+      </label>
+      <label className="resizable-grid__min-live-control">
+        min live
+        <input
+          type="number"
+          min={0}
+          max={5000}
+          value={minLiveBoids}
+          onChange={handleMinLiveChange}
+        />
+      </label>
+      <label className="resizable-grid__speed-toggle-control">
+        invert speed
+        <input
+          type="checkbox"
+          checked={invertSpeed}
+          onChange={handleInvertSpeedChange}
+        />
+      </label>
+      <label className="resizable-grid__blur-intensity-control">
+        blur intensity
+        <input
+          type="number"
+          min={0}
+          max={300}
+          step={1}
+          value={blurIntensity}
+          onChange={handleBlurIntensityChange}
+        />
+      </label>
+      <label className="resizable-grid__debug-toggle-control">
+        debug
+        <input
+          type="checkbox"
+          checked={showDebug}
+          onChange={handleShowDebugChange}
+        />
+      </label>
     </div>
   )
 }

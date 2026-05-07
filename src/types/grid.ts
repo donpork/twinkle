@@ -21,4 +21,10 @@ export interface SceneData {
   containerRects: Map<string, CellRect>
   lightPos: { x: number; y: number }
   pointerOverSurface: boolean
+  pointerDown: boolean
+  mouseReleasedTick: number
+  deathDistancePx: number
+  minLiveBoids: number
+  lastDirection: { x: number; y: number }
+  invertSpeedProfile: boolean
 }

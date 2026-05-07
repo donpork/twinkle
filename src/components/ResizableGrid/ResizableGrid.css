@@ -11,6 +11,47 @@
 }
 
 /* ---------------------------------------------------------------------------
+   Layer 0 — p5 WEBGL canvas host
+   --------------------------------------------------------------------------- */
+.resizable-grid__canvas-host {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Layer 2 — p5 2D boid canvas host (above DOM cells at z-index 1)
+   --------------------------------------------------------------------------- */
+.resizable-grid__boid-host {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.resizable-grid__boid-blur-layer {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: 50cqh;
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.resizable-grid__overlay-label {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgb(175, 187, 195);
+  font-size: clamp(16px, 4.2cqh, 34px);
+  font-family: 'Kochi Mincho', 'Hiragino Mincho ProN', serif;
+  line-height: 1;
+}
+
+/* ---------------------------------------------------------------------------
    Layer 1 — CSS grid cells
    --------------------------------------------------------------------------- */
 .resizable-grid__cells {
@@ -50,10 +91,20 @@
   box-sizing: border-box;
 }
 
+[data-cell-id='1-1'] .resizable-grid__cell-surface {
+  background: rgb(19, 3, 3);
+  border: none;
+}
+
 .resizable-grid__cell-text {
   color: rgba(255, 255, 255, 0.58);
   font-size: 0.8rem;
   white-space: nowrap;
+  opacity: 0;
+}
+
+.resizable-grid--debug .resizable-grid__cell-text {
+  opacity: 1;
 }
 
 .resizable-grid__micro-container {
@@ -84,8 +135,13 @@
 .resizable-grid__splits {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 6;
   pointer-events: none; /* individual handles opt back in */
+  display: none;
+}
+
+.resizable-grid--debug .resizable-grid__splits {
+  display: block;
 }
 
 .resizable-grid__split {
@@ -171,6 +227,140 @@
   font-size: 17px;
   line-height: 1;
   pointer-events: none;
+}
+
+.resizable-grid__death-dist-control {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 4;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(5, 7, 12, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: text;
+  cursor: default;
+}
+
+.resizable-grid__death-dist-control input {
+  width: 3rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.72rem;
+  outline: none;
+  padding: 0;
+  text-align: right;
+}
+
+.resizable-grid__min-live-control {
+  position: absolute;
+  left: 12px;
+  bottom: 44px;
+  z-index: 4;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(5, 7, 12, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: text;
+  cursor: default;
+}
+
+.resizable-grid__min-live-control input {
+  width: 3.6rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.72rem;
+  outline: none;
+  padding: 0;
+  text-align: right;
+}
+
+.resizable-grid__speed-toggle-control {
+  position: absolute;
+  left: 12px;
+  bottom: 76px;
+  z-index: 4;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(5, 7, 12, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: text;
+  cursor: default;
+}
+
+.resizable-grid__speed-toggle-control input {
+  accent-color: rgba(220, 220, 220, 0.9);
+}
+
+.resizable-grid__blur-intensity-control {
+  position: absolute;
+  left: 12px;
+  bottom: 108px;
+  z-index: 4;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(5, 7, 12, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: text;
+  cursor: default;
+}
+
+.resizable-grid__blur-intensity-control input {
+  width: 3rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.72rem;
+  outline: none;
+  padding: 0;
+  text-align: right;
+}
+
+.resizable-grid__debug-toggle-control {
+  position: absolute;
+  right: 12px;
+  bottom: 44px;
+  z-index: 4;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(5, 7, 12, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: text;
+  cursor: default;
+}
+
+.resizable-grid__debug-toggle-control input {
+  accent-color: rgba(220, 220, 220, 0.9);
 }
 
 .resizable-grid__preset-badge {
