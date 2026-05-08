@@ -11,9 +11,11 @@
   },
   "dependencies": {
     "@material/material-color-utilities": "^0.4.0",
+    "lygia": "^1.4.1",
     "p5": "^2.2.3",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "textmode.js": "^0.12.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,9 +1,10 @@
 import { useRef, useState, useLayoutEffect, useEffect, useCallback } from 'react'
 import type { PointerEvent as RPointerEvent, ChangeEvent } from 'react'
 import { applyAxisPixelDelta, renormalizeToSum, enforceTrackBounds } from './trackMath'
-import type { LayoutCellDef, SceneData } from '../../types/grid'
+import type { CellVersion, LayoutCellDef, SceneData } from '../../types/grid'
 import { ShaderCanvas } from './ShaderCanvas'
 import { BoidCanvas } from './BoidCanvas'
+import { TextmodeCanvas } from './TextmodeCanvas'
 import './ResizableGrid.css'
 
 // ---------------------------------------------------------------------------
@@ -66,26 +67,35 @@ export function ResizableGrid() {
   // DOM refs
   const rootRef = useRef<HTMLDivElement>(null)
   const cellsRef = useRef<HTMLDivElement>(null)
+  const labelRef = useRef<HTMLDivElement>(null)
 
   // Death-distance controlled by the input overlay; synced into dataRef without re-render.
   const [deathDist, setDeathDist] = useState(3)
-  const [minLiveBoids, setMinLiveBoids] = useState(5000)
-  const [invertSpeed, setInvertSpeed] = useState(false)
-  const [blurIntensity, setBlurIntensity] = useState(0)
+  const [minLiveBoids, setMinLiveBoids] = useState(10000)
+  const [v02BoidLength, setV02BoidLength] = useState(1)
+  const [v02EdgeVelocityMultiplier, setV02EdgeVelocityMultiplier] = useState(0.3)
+  const [v03BoidSize, setV03BoidSize] = useState(1)
+  const [cellVersion, setCellVersion] = useState<CellVersion>('v02')
   const [showDebug, setShowDebug] = useState(false)
 
   // Scene data shared with the p5 sketch — mutated in place, never triggers re-render.
   const dataRef = useRef<SceneData>({
     cellRects: new Map(),
     containerRects: new Map(),
+    labelRect: null,
     lightPos: { x: -1, y: -1 },
     pointerOverSurface: false,
     pointerDown: false,
     mouseReleasedTick: 0,
     deathDistancePx: 3,
-    minLiveBoids: 5000,
+    minLiveBoids: 10000,
+    boidBlurPx: 4,
+    v02BoidLength: 1,
+    v02EdgeVelocityMultiplier: 0.3,
+    v03BoidSize: 1,
     lastDirection: { x: 1, y: 0 },
     invertSpeedProfile: false,
+    cellVersion: 'v02',
   })
 
   // Active drag state (stored in ref to avoid re-renders during pointermove).
@@ -188,6 +198,18 @@ export function ResizableGrid() {
     }
     dataRef.current.cellRects = newCellRects
     dataRef.current.containerRects = newContainerRects
+    const labelEl = labelRef.current
+    if (labelEl) {
+      const lr = labelEl.getBoundingClientRect()
+      dataRef.current.labelRect = {
+        x: lr.left - rootRect.left,
+        y: lr.top - rootRect.top,
+        w: lr.width,
+        h: lr.height,
+      }
+    } else {
+      dataRef.current.labelRect = null
+    }
   }, [colFracs, rowFracs, box, COLS, ROWS, layout.cells])
 
   // -------------------------------------------------------------------------
@@ -360,35 +382,75 @@ export function ResizableGrid() {
     dataRef.current.minLiveBoids = v
   }
 
-  function handleInvertSpeedChange(e: ChangeEvent<HTMLInputElement>) {
-    const v = e.target.checked
-    setInvertSpeed(v)
-    dataRef.current.invertSpeedProfile = v
+  function handleV02BoidLengthChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(1, Number(e.target.value))
+    setV02BoidLength(v)
+    dataRef.current.v02BoidLength = v
   }
 
-  function handleBlurIntensityChange(e: ChangeEvent<HTMLInputElement>) {
+  function handleV02EdgeVelocityMultiplierChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Number(e.target.value))
-    setBlurIntensity(v)
+    setV02EdgeVelocityMultiplier(v)
+    dataRef.current.v02EdgeVelocityMultiplier = v
+  }
+
+  function handleV03BoidSizeChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(1, Math.floor(Number(e.target.value)))
+    setV03BoidSize(v)
+    dataRef.current.v03BoidSize = v
   }
 
   function handleShowDebugChange(e: ChangeEvent<HTMLInputElement>) {
     setShowDebug(e.target.checked)
   }
 
+  function setVersion(v: CellVersion) {
+    setCellVersion(v)
+    dataRef.current.cellVersion = v
+  }
+
   return (
     <div
       ref={rootRef}
-      className={`resizable-grid ${showDebug ? 'resizable-grid--debug' : ''}`}
+      className={`resizable-grid ${showDebug ? 'resizable-grid--debug' : ''} ${cellVersion === 'v03' ? 'resizable-grid--v03' : ''}`}
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerLeave}
     >
-      {/* z-index 0 — p5 WEBGL canvas */}
-      <ShaderCanvas dataRef={dataRef} />
-      <BoidCanvas dataRef={dataRef} />
-      {focusRect ? (
+      <div className="resizable-grid__version-tabs" role="tablist" aria-label="Cell versions">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={cellVersion === 'v02'}
+          className={`resizable-grid__version-tab ${cellVersion === 'v02' ? 'is-active' : ''}`}
+          onClick={() => setVersion('v02')}
+        >
+          v02
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={cellVersion === 'v03'}
+          className={`resizable-grid__version-tab ${cellVersion === 'v03' ? 'is-active' : ''}`}
+          onClick={() => setVersion('v03')}
+        >
+          v03
+        </button>
+      </div>
+
+      {/* z-index 0 — p5 WEBGL canvas (v02 only; v03 uses solid black body background) */}
+      {cellVersion === 'v02' && <ShaderCanvas dataRef={dataRef} />}
+      {cellVersion === 'v02' && <BoidCanvas dataRef={dataRef} />}
+      {cellVersion === 'v03' && focusRect && (
+        <div
+          className="resizable-grid__v03-pill-bg"
+          style={{ left: focusRect.x, top: focusRect.y, width: focusRect.w, height: focusRect.h }}
+        />
+      )}
+      {cellVersion === 'v03' && <TextmodeCanvas dataRef={dataRef} />}
+      {focusRect && cellVersion === 'v02' ? (
         <div
           className="resizable-grid__boid-blur-layer"
           style={{
@@ -396,14 +458,13 @@ export function ResizableGrid() {
             top: focusRect.y,
             width: focusRect.w,
             height: focusRect.h,
-            backdropFilter: `blur(${blurIntensity}px)`,
-            WebkitBackdropFilter: `blur(${blurIntensity}px)`,
           }}
         />
       ) : null}
-      {focusRect ? (
+      {focusRect && cellVersion === 'v02' ? (
         <div
-          className="resizable-grid__overlay-label"
+          ref={labelRef}
+          className={`resizable-grid__overlay-label ${cellVersion === 'v02' ? 'resizable-grid__overlay-label--v02' : ''}`}
           style={{
             left: focusRect.x,
             top: focusRect.y,
@@ -512,30 +573,50 @@ export function ResizableGrid() {
         <input
           type="number"
           min={0}
-          max={5000}
+          max={10000}
           value={minLiveBoids}
           onChange={handleMinLiveChange}
         />
       </label>
-      <label className="resizable-grid__speed-toggle-control">
-        invert speed
-        <input
-          type="checkbox"
-          checked={invertSpeed}
-          onChange={handleInvertSpeedChange}
-        />
-      </label>
-      <label className="resizable-grid__blur-intensity-control">
-        blur intensity
-        <input
-          type="number"
-          min={0}
-          max={300}
-          step={1}
-          value={blurIntensity}
-          onChange={handleBlurIntensityChange}
-        />
-      </label>
+      {cellVersion === 'v03' ? (
+        <label className="resizable-grid__v03-boid-size-control">
+          boid size
+          <input
+            type="number"
+            min={1}
+            max={8}
+            step={1}
+            value={v03BoidSize}
+            onChange={handleV03BoidSizeChange}
+          />
+        </label>
+      ) : null}
+      {cellVersion === 'v02' ? (
+        <label className="resizable-grid__v02-edge-speed-control">
+          edge speed x
+          <input
+            type="number"
+            min={0}
+            max={8}
+            step={0.05}
+            value={v02EdgeVelocityMultiplier}
+            onChange={handleV02EdgeVelocityMultiplierChange}
+          />
+        </label>
+      ) : null}
+      {cellVersion === 'v02' ? (
+        <label className="resizable-grid__v02-boid-length-control">
+          stroke width
+          <input
+            type="number"
+            min={1}
+            max={200}
+            step={1}
+            value={v02BoidLength}
+            onChange={handleV02BoidLengthChange}
+          />
+        </label>
+      ) : null}
       <label className="resizable-grid__debug-toggle-control">
         debug
         <input

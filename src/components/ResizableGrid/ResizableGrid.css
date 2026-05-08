@@ -1,3 +1,15 @@
+@font-face {
+  font-family: 'LarishAlteSemiBold';
+  src: url('/assets/LarishAlte-SemiBold.otf') format('opentype');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'SelfModernSemiBold';
+  src: url('/assets/self-modern_semibold_trial.otf') format('opentype');
+  font-display: swap;
+}
+
 /* ---------------------------------------------------------------------------
    Root — shared coordinate origin for all three layers.
    --------------------------------------------------------------------------- */
@@ -8,6 +20,10 @@
   overflow: hidden;
   background: rgb(14, 14, 22); /* visible in gaps and before first p5 frame */
   user-select: none;
+}
+
+.resizable-grid--v03 {
+  background: #000;
 }
 
 /* ---------------------------------------------------------------------------
@@ -30,6 +46,20 @@
   pointer-events: none;
 }
 
+.resizable-grid__boid-host--v03 {
+  z-index: 3;
+}
+
+.resizable-grid__v03-pill-bg {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 999px;
+  background: #000;
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  box-sizing: border-box;
+}
+
 .resizable-grid__boid-blur-layer {
   position: absolute;
   z-index: 3;
@@ -47,8 +77,42 @@
   justify-content: center;
   color: rgb(175, 187, 195);
   font-size: clamp(16px, 4.2cqh, 34px);
-  font-family: 'Kochi Mincho', 'Hiragino Mincho ProN', serif;
+  font-family: 'LarishAlteSemiBold', 'Kochi Mincho', 'Hiragino Mincho ProN', serif;
   line-height: 1;
+}
+
+.resizable-grid__overlay-label--v02 {
+  font-family: 'SelfModernSemiBold', 'LarishAlteSemiBold', 'Kochi Mincho', 'Hiragino Mincho ProN', serif;
+}
+
+.resizable-grid__version-tabs {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(5, 7, 12, 0.62);
+}
+
+.resizable-grid__version-tab {
+  border: none;
+  border-radius: 999px;
+  padding: 0.18rem 0.65rem;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.resizable-grid__version-tab.is-active {
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.92);
 }
 
 /* ---------------------------------------------------------------------------
@@ -94,6 +158,14 @@
 [data-cell-id='1-1'] .resizable-grid__cell-surface {
   background: rgb(19, 3, 3);
   border: none;
+}
+
+.resizable-grid--v03 [data-cell-id='1-1'] .resizable-grid__cell-surface {
+  background: transparent;
+}
+
+.resizable-grid--v03 .resizable-grid__cell-surface {
+  background: transparent;
 }
 
 .resizable-grid__cell-text {
@@ -289,7 +361,7 @@
   text-align: right;
 }
 
-.resizable-grid__speed-toggle-control {
+.resizable-grid__boid-blur-control {
   position: absolute;
   left: 12px;
   bottom: 76px;
@@ -307,11 +379,19 @@
   cursor: default;
 }
 
-.resizable-grid__speed-toggle-control input {
-  accent-color: rgba(220, 220, 220, 0.9);
+.resizable-grid__boid-blur-control input {
+  width: 3rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.72rem;
+  outline: none;
+  padding: 0;
+  text-align: right;
 }
 
-.resizable-grid__blur-intensity-control {
+.resizable-grid__v02-boid-length-control {
   position: absolute;
   left: 12px;
   bottom: 108px;
@@ -329,7 +409,7 @@
   cursor: default;
 }
 
-.resizable-grid__blur-intensity-control input {
+.resizable-grid__v02-boid-length-control input {
   width: 3rem;
   background: transparent;
   border: none;
@@ -339,6 +419,88 @@
   outline: none;
   padding: 0;
   text-align: right;
+}
+
+.resizable-grid__v02-edge-speed-control {
+  position: absolute;
+  left: 12px;
+  bottom: 140px;
+  z-index: 4;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(5, 7, 12, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: text;
+  cursor: default;
+}
+
+.resizable-grid__v02-edge-speed-control input {
+  width: 3rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.72rem;
+  outline: none;
+  padding: 0;
+  text-align: right;
+}
+
+.resizable-grid__v03-boid-size-control {
+  position: absolute;
+  left: 12px;
+  bottom: 108px;
+  z-index: 4;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(5, 7, 12, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: text;
+  cursor: default;
+}
+
+.resizable-grid__v03-boid-size-control input {
+  width: 3rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.72rem;
+  outline: none;
+  padding: 0;
+  text-align: right;
+}
+
+.resizable-grid__speed-toggle-control {
+  position: absolute;
+  left: 12px;
+  bottom: 108px;
+  z-index: 4;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 0.25rem 0.55rem;
+  background: rgba(5, 7, 12, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: text;
+  cursor: default;
+}
+
+.resizable-grid__speed-toggle-control input {
+  accent-color: rgba(220, 220, 220, 0.9);
 }
 
 .resizable-grid__debug-toggle-control {
