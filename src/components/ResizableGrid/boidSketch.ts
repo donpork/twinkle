@@ -13,7 +13,6 @@ const SPAWN_JITTER_ANGLE = 0.45
 const SPAWN_SPEED_BASE = 1.25
 const MAX_SPEED_BASE = 2.8
 const MAX_FORCE_BASE = 0.075
-const MIN_SPEED_SCALE = 0.03
 const SEP_RADIUS = 18
 const SEP_WEIGHT = 1.45
 const ALIGN_RADIUS = 44
@@ -27,7 +26,6 @@ const MOUSE_REPEL_GROWTH_PER_FRAME = 0.03
 const MOUSE_REPEL_CAP_MULTIPLIER = 3.2
 const MOUSE_REPEL_RADIUS_GROWTH_PER_FRAME = 1.4
 const MOUSE_REPEL_RADIUS_CAP_MULTIPLIER = 2.8
-const DEFAULT_BOID_LINE_LENGTH = 6
 const V01_COLOR_SMOOTH_ALPHA = 0.16
 const V02_FIXED_SPEED = MAX_SPEED_BASE * 0.96
 const HASH_CELL_SIZE = 44
@@ -127,6 +125,7 @@ interface Boid {
   x: number; y: number
   vx: number; vy: number
   ax: number; ay: number
+  age: number
   sepStrength: number
   alignStrength: number
   cohesionStrength: number
@@ -178,8 +177,8 @@ function v02PillSDF(
   return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0) - radius
 }
 
-function v02HashCell(x: number, y: number): string {
-  return `${Math.floor(x / HASH_CELL_SIZE)},${Math.floor(y / HASH_CELL_SIZE)}`
+function v02HashCell(x: number, y: number, hashCellSize: number): string {
+  return `${Math.floor(x / hashCellSize)},${Math.floor(y / hashCellSize)}`
 }
 
 function v02RandomPointInPill(cx: number, cy: number, cw: number, ch: number): { x: number; y: number } {
@@ -197,7 +196,7 @@ function v02MakeDirectionalBoid(x: number, y: number, dirX: number, dirY: number
   const [rx, ry] = v02Rotate(nx || 1, ny || 0, signedAngle)
   const speed = SPAWN_SPEED_BASE * (0.7 + Math.random() * 0.6)
   return {
-    x, y, vx: rx * speed, vy: ry * speed, ax: 0, ay: 0,
+    x, y, vx: rx * speed, vy: ry * speed, ax: 0, ay: 0, age: 0,
     sepStrength: 0, alignStrength: 0, cohesionStrength: 0,
     colorR: -1, colorG: -1, colorB: -1,
   }
@@ -236,6 +235,7 @@ function v02PointerSpeedScale(
   cx: number, cy: number, cw: number, ch: number,
   invert: boolean,
   edgeVelocityMultiplier: number,
+  centerSpeedScale: number,
 ): number {
   if (lx < 0 || ly < 0) return 1
   const centerX = cx + cw * 0.5
@@ -246,14 +246,15 @@ function v02PointerSpeedScale(
   const raw = invert ? 1 - u : u
   const eased = raw * raw * (3 - 2 * raw)
   const mul = Math.max(0, edgeVelocityMultiplier)
-  return MIN_SPEED_SCALE + (1 - MIN_SPEED_SCALE) * eased * mul
+  const baseCenterSpeed = v02Clamp01(centerSpeedScale)
+  return baseCenterSpeed + (1 - baseCenterSpeed) * eased * mul
 }
 
-function v02BuildSpatialHash(boids: Boid[]): Map<string, number[]> {
+function v02BuildSpatialHash(boids: Boid[], hashCellSize: number): Map<string, number[]> {
   const buckets = new Map<string, number[]>()
   for (let i = 0; i < boids.length; i++) {
     const b = boids[i]
-    const key = v02HashCell(b.x, b.y)
+    const key = v02HashCell(b.x, b.y, hashCellSize)
     const bucket = buckets.get(key)
     if (bucket) bucket.push(i)
     else buckets.set(key, [i])
@@ -270,15 +271,31 @@ function v02FlockAndFilter(
   pointerDown: boolean,
   mouseDownFrames: number,
   deathDistancePx: number,
+  lifeCycleFrames: number,
+  hashCellSize: number,
+  sepRadius: number,
+  alignRadius: number,
+  cohesionRadius: number,
+  sepWeight: number,
+  alignWeight: number,
+  cohesionWeight: number,
 ): Boid[] {
   const hasPointer = lx >= 0
+  const safeHashCellSize = Math.max(1, hashCellSize)
+  const safeLifeCycleFrames = Math.max(1, Math.floor(lifeCycleFrames))
+  const safeSepRadius = Math.max(1, sepRadius)
+  const safeAlignRadius = Math.max(1, alignRadius)
+  const safeCohesionRadius = Math.max(1, cohesionRadius)
+  const safeSepWeight = Math.max(0, sepWeight)
+  const safeAlignWeight = Math.max(0, alignWeight)
+  const safeCohesionWeight = Math.max(0, cohesionWeight)
   const maxSpeed = Math.max(0.02, MAX_SPEED_BASE * speedScale)
   const maxForce = MAX_FORCE_BASE * (0.22 + 0.78 * speedScale)
   const n = boids.length
-  const sepR2 = SEP_RADIUS * SEP_RADIUS
-  const alignR2 = ALIGN_RADIUS * ALIGN_RADIUS
-  const cohesionR2 = COHESION_RADIUS * COHESION_RADIUS
-  const buckets = v02BuildSpatialHash(boids)
+  const sepR2 = safeSepRadius * safeSepRadius
+  const alignR2 = safeAlignRadius * safeAlignRadius
+  const cohesionR2 = safeCohesionRadius * safeCohesionRadius
+  const buckets = v02BuildSpatialHash(boids, safeHashCellSize)
   const [flowVX, flowVY] = v02SetMag(dirX, dirY, maxSpeed)
   const mouseRepelScale = Math.min(
     1 + mouseDownFrames * MOUSE_REPEL_GROWTH_PER_FRAME,
@@ -298,8 +315,8 @@ function v02FlockAndFilter(
     let algnVX = 0, algnVY = 0, algnCnt = 0
     let coheX = 0, coheY = 0, coheCnt = 0
 
-    const bx = Math.floor(b.x / HASH_CELL_SIZE)
-    const by = Math.floor(b.y / HASH_CELL_SIZE)
+    const bx = Math.floor(b.x / safeHashCellSize)
+    const by = Math.floor(b.y / safeHashCellSize)
     let neighborWork = 0
     neighborLoop: for (let oy = -1; oy <= 1; oy++) {
       for (let ox = -1; ox <= 1; ox++) {
@@ -334,22 +351,22 @@ function v02FlockAndFilter(
     if (sepCnt > 0) {
       const [sx, sy] = v02SetMag(sepX / sepCnt, sepY / sepCnt, maxSpeed)
       const [fx, fy] = v02LimitMag(sx - b.vx, sy - b.vy, maxForce)
-      b.ax += fx * SEP_WEIGHT
-      b.ay += fy * SEP_WEIGHT
+      b.ax += fx * safeSepWeight
+      b.ay += fy * safeSepWeight
     }
     if (algnCnt > 0) {
       const [ax2, ay2] = v02SetMag(algnVX / algnCnt, algnVY / algnCnt, maxSpeed)
       const [fx, fy] = v02LimitMag(ax2 - b.vx, ay2 - b.vy, maxForce)
-      b.ax += fx * ALIGN_WEIGHT
-      b.ay += fy * ALIGN_WEIGHT
+      b.ax += fx * safeAlignWeight
+      b.ay += fy * safeAlignWeight
     }
     if (coheCnt > 0) {
       const tx = coheX / coheCnt - b.x
       const ty = coheY / coheCnt - b.y
       const [tx2, ty2] = v02SetMag(tx, ty, maxSpeed)
       const [fx, fy] = v02LimitMag(tx2 - b.vx, ty2 - b.vy, maxForce)
-      b.ax += fx * COHESION_WEIGHT
-      b.ay += fy * COHESION_WEIGHT
+      b.ax += fx * safeCohesionWeight
+      b.ay += fy * safeCohesionWeight
     }
 
     b.sepStrength = v02Clamp01(sepCnt / 6)
@@ -382,7 +399,8 @@ function v02FlockAndFilter(
     ;[b.vx, b.vy] = v02SetMag(b.vx, b.vy, V02_FIXED_SPEED * speedScale)
     b.x += b.vx
     b.y += b.vy
-    if (v02PillSDF(b.x, b.y, cx, cy, cw, ch) <= deathDistancePx) {
+    b.age += 1
+    if (v02PillSDF(b.x, b.y, cx, cy, cw, ch) <= deathDistancePx && b.age <= safeLifeCycleFrames) {
       alive.push(b)
     }
   }
@@ -393,12 +411,14 @@ function v02DrawAllBoids(
   g: p5 | p5.Graphics,
   boids: Boid[],
   v02BoidLength: number,
+  v02BoidLineLength: number,
 ) {
   g.strokeWeight(Math.max(1, v02BoidLength))
   g.noFill()
+  const safeLineLength = Math.max(1, v02BoidLineLength)
   for (const b of boids) {
     const speed = Math.hypot(b.vx, b.vy)
-    const lineLen = Math.max(1, speed * DEFAULT_BOID_LINE_LENGTH)
+    const lineLen = Math.max(1, speed * safeLineLength)
     const ux = speed > 0.001 ? b.vx / speed : 1
     const uy = speed > 0.001 ? b.vy / speed : 0
     const hx = ux * lineLen * 0.5
@@ -487,7 +507,17 @@ export function createBoidSketch(
         deathDistancePx,
         minLiveBoids,
         v02BoidLength,
+        v02BoidLineLength,
         v02EdgeVelocityMultiplier,
+        v02CenterSpeed,
+        v02LifeCycleFrames,
+        v02HashCellSize,
+        v02SepRadius,
+        v02AlignRadius,
+        v02CohesionRadius,
+        v02SepWeight,
+        v02AlignWeight,
+        v02CohesionWeight,
         labelRect,
         lastDirection,
         invertSpeedProfile,
@@ -511,6 +541,7 @@ export function createBoidSketch(
         cell11.x, cell11.y, cell11.w, cell11.h,
         invertSpeedProfile,
         v02EdgeVelocityMultiplier,
+        v02CenterSpeed,
       )
 
       v02Boids = v02FlockAndFilter(
@@ -522,6 +553,14 @@ export function createBoidSketch(
         pointerDown,
         v02MouseDownFrames,
         deathDistancePx,
+        v02LifeCycleFrames,
+        v02HashCellSize,
+        v02SepRadius,
+        v02AlignRadius,
+        v02CohesionRadius,
+        v02SepWeight,
+        v02AlignWeight,
+        v02CohesionWeight,
       )
 
       v02SpawnUpToMinimum(
@@ -532,7 +571,7 @@ export function createBoidSketch(
       )
 
       boidBuffer.clear()
-      v02DrawAllBoids(boidBuffer, v02Boids, v02BoidLength)
+      v02DrawAllBoids(boidBuffer, v02Boids, v02BoidLength, v02BoidLineLength)
 
       p.clear()
       p.shader(boidPostShaderV02)
