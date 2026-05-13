@@ -1,6 +1,7 @@
 import type { MutableRefObject } from 'react'
 import { textmode } from 'textmode.js'
 import type { Textmodifier } from 'textmode.js'
+import v03FontUrl from '@assets/Arial Unicode.ttf?url'
 import type { SceneData } from '../../types/grid'
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,9 @@ const V03_FIXED_SPEED = V03_MAX_SPEED_BASE * 0.96
 const V03_HASH_CELL_SIZE = 44
 const V03_MAX_NEIGHBORS_PER_BOID = 36
 const V03_FONT_SIZE = 8
+const V03_GLYPH_HOLD_FRAMES = 30
+/** Slowest → fastest (velocity magnitude before fixed-speed clamp). */
+const V03_SPEED_GLYPHS = ['░', '▒', '▓', '✦', '✧', '✩', '✬', '✱', '✲', '✳', '✴', '✵', '✶', '✹', '✿'] as const
 
 // ---------------------------------------------------------------------------
 // Boid type
@@ -259,14 +263,26 @@ function v03FlockAndFilter(
   return alive
 }
 
-// 8-direction ASCII character based on velocity angle
-const DIR_CHARS = ['-', '/', '|', '\\', '-', '/', '|', '\\'] as const
-function v03DirChar(angle: number): string {
-  const idx = ((Math.round(((angle + Math.PI) / (Math.PI * 2)) * 8) % 8) + 8) % 8
-  return DIR_CHARS[idx]
+function v03GlyphForFrame(frameCount: number, boidIndex: number): string {
+  const glyphCount = V03_SPEED_GLYPHS.length
+  const frameBucket = Math.floor(frameCount / V03_GLYPH_HOLD_FRAMES)
+  const glyphIndex = (frameBucket + boidIndex) % glyphCount
+  return V03_SPEED_GLYPHS[glyphIndex]
 }
 
-function v03DrawAllBoids(t: Textmodifier, boids: Boid[], v03BoidSize: number) {
+function v03ApplyGridResolution(t: Textmodifier, cols: number, rows: number) {
+  const grid = t.grid
+  if (!grid) return
+  const targetCols = Math.max(1, Math.floor(cols))
+  const targetRows = Math.max(1, Math.floor(rows))
+  if (grid.cols !== targetCols) grid.cols = targetCols
+  if (grid.rows !== targetRows) grid.rows = targetRows
+}
+
+function v03DrawAllBoids(
+  t: Textmodifier,
+  boids: Boid[],
+) {
   const grid = t.grid
   if (!grid) return
   const cw = grid.cellWidth
@@ -279,11 +295,8 @@ function v03DrawAllBoids(t: Textmodifier, boids: Boid[], v03BoidSize: number) {
 
   t.cellColor(0, 0, 0, 0)
 
-  const size = Math.max(1, Math.floor(v03BoidSize))
-
-  for (const b of boids) {
-    const angle = Math.atan2(b.vy, b.vx)
-
+  for (let i = 0; i < boids.length; i++) {
+    const b = boids[i]
     // Boid coords are in viewport pixels, same origin as the textmode canvas.
     // Convert to textmode centered grid coords: subtract centering offset, divide by cell size, shift by half-grid.
     const gx = Math.round((b.x - ox) / cw - halfCols)
@@ -292,9 +305,8 @@ function v03DrawAllBoids(t: Textmodifier, boids: Boid[], v03BoidSize: number) {
     t.push()
     t.translate(gx, gy)
     t.charColor(255, 255, 255, 236)
-    t.char(v03DirChar(angle))
-    if (size === 1) t.point()
-    else t.rect(size, size)
+    t.char(v03GlyphForFrame(t.frameCount, i))
+    t.point()
     t.pop()
   }
 }
@@ -324,7 +336,13 @@ export function createV03Sketch(
   const w = Math.max(host.clientWidth, 1)
   const h = Math.max(host.clientHeight, 1)
 
-  const t = textmode.create({ width: w, height: h, fontSize: V03_FONT_SIZE, frameRate: 60 })
+  const t = textmode.create({
+    width: w,
+    height: h,
+    fontSize: V03_FONT_SIZE,
+    frameRate: 60,
+    fontSource: v03FontUrl,
+  })
 
   t.canvas.style.position = 'absolute'
   t.canvas.style.inset = '0'
@@ -341,7 +359,8 @@ export function createV03Sketch(
       pointerDown,
       deathDistancePx,
       minLiveBoids,
-      v03BoidSize,
+      v03ResolutionCols,
+      v03ResolutionRows,
       lastDirection,
       invertSpeedProfile,
     } = dataRef.current
@@ -359,6 +378,7 @@ export function createV03Sketch(
       boids = v03InitBoids(cell.x, cell.y, cell.w, cell.h, lastDirection.x, lastDirection.y)
       initialized = true
     }
+    v03ApplyGridResolution(t, v03ResolutionCols, v03ResolutionRows)
 
     const speedScale = v03PointerSpeedScale(
       lightPos.x, lightPos.y,
@@ -380,13 +400,16 @@ export function createV03Sketch(
     v03SpawnUpToMinimum(boids, minLiveBoids, cell.x, cell.y, cell.w, cell.h, lastDirection.x, lastDirection.y)
 
     t.clear()
-    v03DrawAllBoids(t, boids, v03BoidSize)
+    v03DrawAllBoids(t, boids)
   })
 
   const ro = new ResizeObserver(() => {
     const rw = host.clientWidth
     const rh = host.clientHeight
-    if (rw > 0 && rh > 0) t.resizeCanvas(rw, rh)
+    if (rw > 0 && rh > 0) {
+      t.resizeCanvas(rw, rh)
+      v03ApplyGridResolution(t, dataRef.current.v03ResolutionCols, dataRef.current.v03ResolutionRows)
+    }
   })
   ro.observe(host)
 

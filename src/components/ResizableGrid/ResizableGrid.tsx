@@ -84,7 +84,8 @@ export function ResizableGrid() {
   const [v02CohesionWeight, setV02CohesionWeight] = useState(1.0)
   const [v02CenterSpeed, setV02CenterSpeed] = useState(0.03)
   const [v02LifeCycleFrames, setV02LifeCycleFrames] = useState(900)
-  const [v03BoidSize, setV03BoidSize] = useState(1)
+  const [v03ResolutionCols, setV03ResolutionCols] = useState(80)
+  const [v03ResolutionRows, setV03ResolutionRows] = useState(45)
   const [cellVersion, setCellVersion] = useState<CellVersion>('v02')
   const [showDebug, setShowDebug] = useState(false)
   const [showControls, setShowControls] = useState(true)
@@ -113,7 +114,8 @@ export function ResizableGrid() {
     v02CohesionWeight: 1.0,
     v02CenterSpeed: 0.03,
     v02LifeCycleFrames: 900,
-    v03BoidSize: 1,
+    v03ResolutionCols: 80,
+    v03ResolutionRows: 45,
     lastDirection: { x: 1, y: 0 },
     invertSpeedProfile: false,
     cellVersion: 'v02',
@@ -421,12 +423,6 @@ export function ResizableGrid() {
     dataRef.current.v02EdgeVelocityMultiplier = v
   }
 
-  function handleV03BoidSizeChange(e: ChangeEvent<HTMLInputElement>) {
-    const v = Math.max(1, Math.floor(Number(e.target.value)))
-    setV03BoidSize(v)
-    dataRef.current.v03BoidSize = v
-  }
-
   function handleV02HashCellSizeChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(1, Math.floor(Number(e.target.value)))
     setV02HashCellSize(v)
@@ -479,6 +475,18 @@ export function ResizableGrid() {
     const v = Math.max(1, Math.floor(Number(e.target.value)))
     setV02LifeCycleFrames(v)
     dataRef.current.v02LifeCycleFrames = v
+  }
+
+  function handleV03ResolutionColsChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(1, Math.floor(Number(e.target.value)))
+    setV03ResolutionCols(v)
+    dataRef.current.v03ResolutionCols = v
+  }
+
+  function handleV03ResolutionRowsChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(1, Math.floor(Number(e.target.value)))
+    setV03ResolutionRows(v)
+    dataRef.current.v03ResolutionRows = v
   }
 
   function handleShowDebugChange(e: ChangeEvent<HTMLInputElement>) {
@@ -679,7 +687,7 @@ export function ResizableGrid() {
             </label>
           </div>
 
-          {cellVersion === 'v02' ? (
+          {(cellVersion === 'v02' || cellVersion === 'v03') ? (
             <div className="resizable-grid__controls-section">
               <div className="resizable-grid__controls-section-title">Boids</div>
               <label className="resizable-grid__control-row">
@@ -740,7 +748,7 @@ export function ResizableGrid() {
             </div>
           ) : null}
 
-          {cellVersion === 'v02' ? (
+          {(cellVersion === 'v02' || cellVersion === 'v03') ? (
             <div className="resizable-grid__controls-section">
               <div className="resizable-grid__controls-section-title">Flocking</div>
               <label className="resizable-grid__control-row">
@@ -827,14 +835,25 @@ export function ResizableGrid() {
             <div className="resizable-grid__controls-section">
               <div className="resizable-grid__controls-section-title">ASCII</div>
               <label className="resizable-grid__control-row">
-                boid size
+                cols
                 <input
                   type="number"
                   min={1}
-                  max={8}
+                  max={512}
                   step={1}
-                  value={v03BoidSize}
-                  onChange={handleV03BoidSizeChange}
+                  value={v03ResolutionCols}
+                  onChange={handleV03ResolutionColsChange}
+                />
+              </label>
+              <label className="resizable-grid__control-row">
+                rows
+                <input
+                  type="number"
+                  min={1}
+                  max={512}
+                  step={1}
+                  value={v03ResolutionRows}
+                  onChange={handleV03ResolutionRowsChange}
                 />
               </label>
             </div>

@@ -40,7 +40,8 @@ export interface SceneData {
   v02CohesionWeight: number
   v02CenterSpeed: number
   v02LifeCycleFrames: number
-  v03BoidSize: number
+  v03ResolutionCols: number
+  v03ResolutionRows: number
   lastDirection: { x: number; y: number }
   invertSpeedProfile: boolean
   cellVersion: CellVersion
