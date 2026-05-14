@@ -44,6 +44,41 @@ If ambiguous, ask before editing.
    - Sync state -> `dataRef.current` in `ResizableGrid.tsx`.
 6. Update user-facing labels if requested.
 
+## Current controls panel + parameter map (source of truth)
+
+When duplicating a runtime, account for the current controls in
+`src/components/ResizableGrid/ResizableGrid.tsx` and the backing fields in
+`src/types/grid.ts` `SceneData`.
+
+- Global section:
+  - `edge buffer (px)` -> `deathDist` -> `dataRef.current.deathDistancePx`
+  - `min live` -> `minLiveBoids` -> `dataRef.current.minLiveBoids`
+  - `debug` -> `showDebug` (UI-only, not in `SceneData`)
+- Boids section (currently shown for both `v02` and `brush`):
+  - `edge speed x` -> `v02EdgeVelocityMultiplier`
+  - `center speed` -> `v02CenterSpeed`
+  - `life frames` -> `v02LifeCycleFrames`
+  - `stroke width` -> `v02BoidLength`
+  - `boid length` -> `v02BoidLineLength`
+- Flocking section (currently shown for both `v02` and `brush`):
+  - `hash cell` -> `v02HashCellSize`
+  - `sep radius` -> `v02SepRadius`
+  - `align radius` -> `v02AlignRadius`
+  - `cohesion radius` -> `v02CohesionRadius`
+  - `sep weight` -> `v02SepWeight`
+  - `align weight` -> `v02AlignWeight`
+  - `cohesion weight` -> `v02CohesionWeight`
+
+If independence is requested (recommended default when splitting versions):
+
+1. Add target-version fields to `SceneData` (for example `brushBoidLength`,
+   `brushSepRadius`, etc).
+2. Add separate React state + handlers in `ResizableGrid.tsx` for that version.
+3. Show per-version controls with `cellVersion`-gated UI, rather than sharing
+   `(cellVersion === 'v02' || cellVersion === 'brush')`.
+4. Update target runtime to read only its own version-specific fields.
+5. Keep source runtime behavior and fields untouched.
+
 ## Guardrails
 
 - Do not refactor unrelated modules.

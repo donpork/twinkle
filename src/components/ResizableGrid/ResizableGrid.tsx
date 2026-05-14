@@ -1,10 +1,9 @@
 import { useRef, useState, useLayoutEffect, useEffect, useCallback } from 'react'
-import type { PointerEvent as RPointerEvent, ChangeEvent } from 'react'
+import type { MutableRefObject, PointerEvent as RPointerEvent, ChangeEvent } from 'react'
 import { applyAxisPixelDelta, renormalizeToSum, enforceTrackBounds } from './trackMath'
-import type { CellVersion, LayoutCellDef, SceneData } from '../../types/grid'
+import type { CellRect, LayoutCellDef, SharedSceneData, V02SceneData } from '../../types/grid'
 import { ShaderCanvas } from './ShaderCanvas'
 import { BoidCanvas } from './BoidCanvas'
-import { TextmodeCanvas } from './TextmodeCanvas'
 import './ResizableGrid.css'
 
 // ---------------------------------------------------------------------------
@@ -69,9 +68,9 @@ export function ResizableGrid() {
   const cellsRef = useRef<HTMLDivElement>(null)
   const labelRef = useRef<HTMLDivElement>(null)
 
-  // Death-distance controlled by the input overlay; synced into dataRef without re-render.
-  const [deathDist, setDeathDist] = useState(3)
-  const [minLiveBoids, setMinLiveBoids] = useState(10000)
+  // ---- v02 controls ----
+  const [v02DeathDist, setV02DeathDist] = useState(3)
+  const [v02MinLiveBoids, setV02MinLiveBoids] = useState(100)
   const [v02BoidLength, setV02BoidLength] = useState(1)
   const [v02BoidLineLength, setV02BoidLineLength] = useState(6)
   const [v02EdgeVelocityMultiplier, setV02EdgeVelocityMultiplier] = useState(0.3)
@@ -84,14 +83,13 @@ export function ResizableGrid() {
   const [v02CohesionWeight, setV02CohesionWeight] = useState(1.0)
   const [v02CenterSpeed, setV02CenterSpeed] = useState(0.03)
   const [v02LifeCycleFrames, setV02LifeCycleFrames] = useState(900)
-  const [v03ResolutionCols, setV03ResolutionCols] = useState(80)
-  const [v03ResolutionRows, setV03ResolutionRows] = useState(45)
-  const [cellVersion, setCellVersion] = useState<CellVersion>('v02')
+
   const [showDebug, setShowDebug] = useState(false)
   const [showControls, setShowControls] = useState(true)
+  const [focusRect, setFocusRect] = useState<CellRect | null>(null)
 
-  // Scene data shared with the p5 sketch — mutated in place, never triggers re-render.
-  const dataRef = useRef<SceneData>({
+  // ---- Independent runtime data stores — mutated in place, never trigger re-render ----
+  const v02DataRef = useRef<V02SceneData>({
     cellRects: new Map(),
     containerRects: new Map(),
     labelRect: null,
@@ -99,8 +97,11 @@ export function ResizableGrid() {
     pointerOverSurface: false,
     pointerDown: false,
     mouseReleasedTick: 0,
+    lastDirection: { x: 1, y: 0 },
+    invertSpeedProfile: false,
+    cellVersion: 'v02',
     deathDistancePx: 3,
-    minLiveBoids: 10000,
+    minLiveBoids: 100,
     boidBlurPx: 4,
     v02BoidLength: 1,
     v02BoidLineLength: 6,
@@ -114,11 +115,6 @@ export function ResizableGrid() {
     v02CohesionWeight: 1.0,
     v02CenterSpeed: 0.03,
     v02LifeCycleFrames: 900,
-    v03ResolutionCols: 80,
-    v03ResolutionRows: 45,
-    lastDirection: { x: 1, y: 0 },
-    invertSpeedProfile: false,
-    cellVersion: 'v02',
   })
 
   // Active drag state (stored in ref to avoid re-renders during pointermove).
@@ -144,7 +140,9 @@ export function ResizableGrid() {
 
   // Window-level safety reset so pointerDown never stays true after a captured drag release.
   useEffect(() => {
-    const reset = () => { dataRef.current.pointerDown = false }
+    const reset = () => {
+      v02DataRef.current.pointerDown = false
+    }
     window.addEventListener('pointerup', reset)
     window.addEventListener('pointercancel', reset)
     return () => {
@@ -166,7 +164,6 @@ export function ResizableGrid() {
     // --- Split handle positions (measured from seam cell edges) ---
     const newSplitV: number[] = []
     for (let i = 0; i < COLS - 1; i++) {
-      // Find a non-spanning, non-empty cell at this column that we can measure.
       const seam = layout.cells.find(c => c.col === i && c.colSpan === 1 && c.type !== 'empty')
       const seamEl = seam
         ? cellsEl.querySelector<HTMLElement>(`[data-cell-id="${seam.id}"]`)
@@ -174,7 +171,6 @@ export function ResizableGrid() {
       if (seamEl) {
         newSplitV.push(seamEl.getBoundingClientRect().right - rootRect.left)
       } else {
-        // Fallback: derive from cumulative fractions.
         const cum = colFracs.slice(0, i + 1).reduce((a, b) => a + b, 0)
         newSplitV.push(cum * root.clientWidth)
       }
@@ -197,9 +193,9 @@ export function ResizableGrid() {
     setSplitV(newSplitV)
     setSplitH(newSplitH)
 
-    // --- Push cell and container rects into SceneData for the p5 sketch ---
-    const newCellRects = new Map<string, import('../../types/grid').CellRect>()
-    const newContainerRects = new Map<string, import('../../types/grid').CellRect>()
+    // --- Push cell and container rects into v02 runtime store ---
+    const newCellRects = new Map<string, CellRect>()
+    const newContainerRects = new Map<string, CellRect>()
     for (const cell of layout.cells.filter(c => c.type !== 'empty')) {
       const cellEl = cellsEl.querySelector<HTMLElement>(`[data-cell-id="${cell.id}"]`)
       if (!cellEl) continue
@@ -219,19 +215,21 @@ export function ResizableGrid() {
         h: sr.height,
       })
     }
-    dataRef.current.cellRects = newCellRects
-    dataRef.current.containerRects = newContainerRects
+    v02DataRef.current.cellRects = newCellRects
+    v02DataRef.current.containerRects = newContainerRects
+    setFocusRect(newContainerRects.get('1-1') ?? null)
+
     const labelEl = labelRef.current
     if (labelEl) {
       const lr = labelEl.getBoundingClientRect()
-      dataRef.current.labelRect = {
+      v02DataRef.current.labelRect = {
         x: lr.left - rootRect.left,
         y: lr.top - rootRect.top,
         w: lr.width,
         h: lr.height,
       }
     } else {
-      dataRef.current.labelRect = null
+      v02DataRef.current.labelRect = null
     }
   }, [colFracs, rowFracs, box, COLS, ROWS, layout.cells])
 
@@ -351,21 +349,20 @@ export function ResizableGrid() {
   }
 
   // -------------------------------------------------------------------------
-  // Render
+  // Pointer handlers
   // -------------------------------------------------------------------------
   const colTemplate = colFracs.map(f => `minmax(min-content, ${f}fr)`).join(' ')
   const rowTemplate = rowFracs.map(f => `minmax(min-content, ${f}fr)`).join(' ')
-  const focusRect = dataRef.current.containerRects.get('1-1') ?? null
 
   function handlePointerMove(e: RPointerEvent<HTMLDivElement>) {
     const root = rootRef.current
     if (!root) return
     const rect = root.getBoundingClientRect()
     const lightPos = { x: e.clientX - rect.left, y: e.clientY - rect.top }
-    dataRef.current.lightPos = lightPos
-    dataRef.current.pointerOverSurface = true
+    v02DataRef.current.lightPos = lightPos
+    v02DataRef.current.pointerOverSurface = true
 
-    const target = dataRef.current.containerRects.get('1-1')
+    const target = v02DataRef.current.containerRects.get('1-1')
     if (target) {
       const cx = target.x + target.w * 0.5
       const cy = target.y + target.h * 0.5
@@ -373,173 +370,133 @@ export function ResizableGrid() {
       const dy = lightPos.y - cy
       const mag = Math.hypot(dx, dy)
       if (mag > 1) {
-        dataRef.current.lastDirection = { x: dx / mag, y: dy / mag }
+        const dir = { x: dx / mag, y: dy / mag }
+        v02DataRef.current.lastDirection = dir
       }
     }
   }
 
   function handlePointerLeave() {
-    dataRef.current.lightPos = { x: -1, y: -1 }
-    dataRef.current.pointerOverSurface = false
-    dataRef.current.pointerDown = false
+    v02DataRef.current.lightPos = { x: -1, y: -1 }
+    v02DataRef.current.pointerOverSurface = false
+    v02DataRef.current.pointerDown = false
   }
 
   const handlePointerDown = useCallback(() => {
-    dataRef.current.pointerDown = true
+    v02DataRef.current.pointerDown = true
   }, [])
 
   const handlePointerUp = useCallback(() => {
-    dataRef.current.pointerDown = false
-    dataRef.current.mouseReleasedTick++
+    v02DataRef.current.pointerDown = false
+    v02DataRef.current.mouseReleasedTick++
   }, [])
 
-  function handleDeathDistChange(e: ChangeEvent<HTMLInputElement>) {
+  // -------------------------------------------------------------------------
+  // v02 control handlers
+  // -------------------------------------------------------------------------
+  function handleV02DeathDistChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Number(e.target.value))
-    setDeathDist(v)
-    dataRef.current.deathDistancePx = v
+    setV02DeathDist(v)
+    v02DataRef.current.deathDistancePx = v
   }
 
-  function handleMinLiveChange(e: ChangeEvent<HTMLInputElement>) {
+  function handleV02MinLiveChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Math.floor(Number(e.target.value)))
-    setMinLiveBoids(v)
-    dataRef.current.minLiveBoids = v
+    setV02MinLiveBoids(v)
+    v02DataRef.current.minLiveBoids = v
   }
 
   function handleV02BoidLengthChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(1, Number(e.target.value))
     setV02BoidLength(v)
-    dataRef.current.v02BoidLength = v
+    v02DataRef.current.v02BoidLength = v
   }
 
   function handleV02BoidLineLengthChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(1, Number(e.target.value))
     setV02BoidLineLength(v)
-    dataRef.current.v02BoidLineLength = v
+    v02DataRef.current.v02BoidLineLength = v
   }
 
   function handleV02EdgeVelocityMultiplierChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Number(e.target.value))
     setV02EdgeVelocityMultiplier(v)
-    dataRef.current.v02EdgeVelocityMultiplier = v
+    v02DataRef.current.v02EdgeVelocityMultiplier = v
   }
 
   function handleV02HashCellSizeChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(1, Math.floor(Number(e.target.value)))
     setV02HashCellSize(v)
-    dataRef.current.v02HashCellSize = v
+    v02DataRef.current.v02HashCellSize = v
   }
 
   function handleV02SepRadiusChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(1, Number(e.target.value))
     setV02SepRadius(v)
-    dataRef.current.v02SepRadius = v
+    v02DataRef.current.v02SepRadius = v
   }
 
   function handleV02AlignRadiusChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(1, Number(e.target.value))
     setV02AlignRadius(v)
-    dataRef.current.v02AlignRadius = v
+    v02DataRef.current.v02AlignRadius = v
   }
 
   function handleV02CohesionRadiusChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(1, Number(e.target.value))
     setV02CohesionRadius(v)
-    dataRef.current.v02CohesionRadius = v
+    v02DataRef.current.v02CohesionRadius = v
   }
 
   function handleV02SepWeightChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Number(e.target.value))
     setV02SepWeight(v)
-    dataRef.current.v02SepWeight = v
+    v02DataRef.current.v02SepWeight = v
   }
 
   function handleV02AlignWeightChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Number(e.target.value))
     setV02AlignWeight(v)
-    dataRef.current.v02AlignWeight = v
+    v02DataRef.current.v02AlignWeight = v
   }
 
   function handleV02CohesionWeightChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Number(e.target.value))
     setV02CohesionWeight(v)
-    dataRef.current.v02CohesionWeight = v
+    v02DataRef.current.v02CohesionWeight = v
   }
 
   function handleV02CenterSpeedChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Number(e.target.value))
     setV02CenterSpeed(v)
-    dataRef.current.v02CenterSpeed = v
+    v02DataRef.current.v02CenterSpeed = v
   }
 
   function handleV02LifeCycleFramesChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(1, Math.floor(Number(e.target.value)))
     setV02LifeCycleFrames(v)
-    dataRef.current.v02LifeCycleFrames = v
-  }
-
-  function handleV03ResolutionColsChange(e: ChangeEvent<HTMLInputElement>) {
-    const v = Math.max(1, Math.floor(Number(e.target.value)))
-    setV03ResolutionCols(v)
-    dataRef.current.v03ResolutionCols = v
-  }
-
-  function handleV03ResolutionRowsChange(e: ChangeEvent<HTMLInputElement>) {
-    const v = Math.max(1, Math.floor(Number(e.target.value)))
-    setV03ResolutionRows(v)
-    dataRef.current.v03ResolutionRows = v
+    v02DataRef.current.v02LifeCycleFrames = v
   }
 
   function handleShowDebugChange(e: ChangeEvent<HTMLInputElement>) {
     setShowDebug(e.target.checked)
   }
 
-  function setVersion(v: CellVersion) {
-    setCellVersion(v)
-    dataRef.current.cellVersion = v
-  }
-
   return (
     <div
       ref={rootRef}
-      className={`resizable-grid ${showDebug ? 'resizable-grid--debug' : ''} ${cellVersion === 'v03' ? 'resizable-grid--v03' : ''}`}
+      className={`resizable-grid ${showDebug ? 'resizable-grid--debug' : ''}`}
       onPointerMove={handlePointerMove}
       onPointerLeave={handlePointerLeave}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerLeave}
     >
-      <div className="resizable-grid__version-tabs" role="tablist" aria-label="Cell versions">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={cellVersion === 'v02'}
-          className={`resizable-grid__version-tab ${cellVersion === 'v02' ? 'is-active' : ''}`}
-          onClick={() => setVersion('v02')}
-        >
-          boids
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={cellVersion === 'v03'}
-          className={`resizable-grid__version-tab ${cellVersion === 'v03' ? 'is-active' : ''}`}
-          onClick={() => setVersion('v03')}
-        >
-          ascii
-        </button>
-      </div>
+      {/* z-index 0 — p5 canvases */}
+      <ShaderCanvas dataRef={v02DataRef as MutableRefObject<SharedSceneData>} active />
+      <BoidCanvas dataRef={v02DataRef} active />
 
-      {/* z-index 0 — p5 WEBGL canvas (v02 only; v03 uses solid black body background) */}
-      {cellVersion === 'v02' && <ShaderCanvas dataRef={dataRef} />}
-      {cellVersion === 'v02' && <BoidCanvas dataRef={dataRef} />}
-      {cellVersion === 'v03' && focusRect && (
-        <div
-          className="resizable-grid__v03-pill-bg"
-          style={{ left: focusRect.x, top: focusRect.y, width: focusRect.w, height: focusRect.h }}
-        />
-      )}
-      {cellVersion === 'v03' && <TextmodeCanvas dataRef={dataRef} />}
-      {focusRect && cellVersion === 'v02' ? (
+      {focusRect ? (
         <div
           className="resizable-grid__boid-blur-layer"
           style={{
@@ -550,10 +507,10 @@ export function ResizableGrid() {
           }}
         />
       ) : null}
-      {focusRect && cellVersion === 'v02' ? (
+      {focusRect ? (
         <div
           ref={labelRef}
-          className={`resizable-grid__overlay-label ${cellVersion === 'v02' ? 'resizable-grid__overlay-label--v02' : ''}`}
+          className="resizable-grid__overlay-label resizable-grid__overlay-label--v02"
           style={{
             left: focusRect.x,
             top: focusRect.y,
@@ -645,6 +602,7 @@ export function ResizableGrid() {
           )),
         )}
       </div>
+
       <button
         type="button"
         className="resizable-grid__controls-toggle"
@@ -652,9 +610,11 @@ export function ResizableGrid() {
       >
         {showControls ? 'hide controls' : 'show controls'}
       </button>
+
       {showControls ? (
         <div className="resizable-grid__controls-group">
           <div className="resizable-grid__controls-meta">Preset: {layout.name}</div>
+
           <div className="resizable-grid__controls-section">
             <div className="resizable-grid__controls-section-title">Global</div>
             <label className="resizable-grid__control-row">
@@ -663,8 +623,8 @@ export function ResizableGrid() {
                 type="number"
                 min={0}
                 max={300}
-                value={deathDist}
-                onChange={handleDeathDistChange}
+                value={v02DeathDist}
+                onChange={handleV02DeathDistChange}
               />
             </label>
             <label className="resizable-grid__control-row">
@@ -673,8 +633,8 @@ export function ResizableGrid() {
                 type="number"
                 min={0}
                 max={10000}
-                value={minLiveBoids}
-                onChange={handleMinLiveChange}
+                value={v02MinLiveBoids}
+                onChange={handleV02MinLiveChange}
               />
             </label>
             <label className="resizable-grid__control-row resizable-grid__control-row--checkbox">
@@ -687,177 +647,145 @@ export function ResizableGrid() {
             </label>
           </div>
 
-          {(cellVersion === 'v02' || cellVersion === 'v03') ? (
-            <div className="resizable-grid__controls-section">
-              <div className="resizable-grid__controls-section-title">Boids</div>
-              <label className="resizable-grid__control-row">
-                edge speed x
-                <input
-                  type="number"
-                  min={0}
-                  max={8}
-                  step={0.05}
-                  value={v02EdgeVelocityMultiplier}
-                  onChange={handleV02EdgeVelocityMultiplierChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                center speed
-                <input
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.01}
-                  value={v02CenterSpeed}
-                  onChange={handleV02CenterSpeedChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                life frames
-                <input
-                  type="number"
-                  min={1}
-                  max={20000}
-                  step={1}
-                  value={v02LifeCycleFrames}
-                  onChange={handleV02LifeCycleFramesChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                stroke width
-                <input
-                  type="number"
-                  min={1}
-                  max={200}
-                  step={1}
-                  value={v02BoidLength}
-                  onChange={handleV02BoidLengthChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                boid length
-                <input
-                  type="number"
-                  min={1}
-                  max={200}
-                  step={1}
-                  value={v02BoidLineLength}
-                  onChange={handleV02BoidLineLengthChange}
-                />
-              </label>
-            </div>
-          ) : null}
+          <div className="resizable-grid__controls-section">
+            <div className="resizable-grid__controls-section-title">Boids</div>
+            <label className="resizable-grid__control-row">
+              edge speed x
+              <input
+                type="number"
+                min={0}
+                max={8}
+                step={0.05}
+                value={v02EdgeVelocityMultiplier}
+                onChange={handleV02EdgeVelocityMultiplierChange}
+              />
+            </label>
+            <label className="resizable-grid__control-row">
+              center speed
+              <input
+                type="number"
+                min={0}
+                max={2}
+                step={0.01}
+                value={v02CenterSpeed}
+                onChange={handleV02CenterSpeedChange}
+              />
+            </label>
+            <label className="resizable-grid__control-row">
+              life frames
+              <input
+                type="number"
+                min={1}
+                max={20000}
+                step={1}
+                value={v02LifeCycleFrames}
+                onChange={handleV02LifeCycleFramesChange}
+              />
+            </label>
+            <label className="resizable-grid__control-row">
+              stroke width
+              <input
+                type="number"
+                min={1}
+                max={200}
+                step={1}
+                value={v02BoidLength}
+                onChange={handleV02BoidLengthChange}
+              />
+            </label>
+            <label className="resizable-grid__control-row">
+              boid length
+              <input
+                type="number"
+                min={1}
+                max={200}
+                step={1}
+                value={v02BoidLineLength}
+                onChange={handleV02BoidLineLengthChange}
+              />
+            </label>
+          </div>
 
-          {(cellVersion === 'v02' || cellVersion === 'v03') ? (
-            <div className="resizable-grid__controls-section">
-              <div className="resizable-grid__controls-section-title">Flocking</div>
-              <label className="resizable-grid__control-row">
-                hash cell
-                <input
-                  type="number"
-                  min={1}
-                  max={512}
-                  step={1}
-                  value={v02HashCellSize}
-                  onChange={handleV02HashCellSizeChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                sep radius
-                <input
-                  type="number"
-                  min={1}
-                  max={500}
-                  step={1}
-                  value={v02SepRadius}
-                  onChange={handleV02SepRadiusChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                align radius
-                <input
-                  type="number"
-                  min={1}
-                  max={500}
-                  step={1}
-                  value={v02AlignRadius}
-                  onChange={handleV02AlignRadiusChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                cohesion radius
-                <input
-                  type="number"
-                  min={1}
-                  max={500}
-                  step={1}
-                  value={v02CohesionRadius}
-                  onChange={handleV02CohesionRadiusChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                sep weight
-                <input
-                  type="number"
-                  min={0}
-                  max={10}
-                  step={0.05}
-                  value={v02SepWeight}
-                  onChange={handleV02SepWeightChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                align weight
-                <input
-                  type="number"
-                  min={0}
-                  max={10}
-                  step={0.05}
-                  value={v02AlignWeight}
-                  onChange={handleV02AlignWeightChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                cohesion weight
-                <input
-                  type="number"
-                  min={0}
-                  max={10}
-                  step={0.05}
-                  value={v02CohesionWeight}
-                  onChange={handleV02CohesionWeightChange}
-                />
-              </label>
-            </div>
-          ) : null}
-
-          {cellVersion === 'v03' ? (
-            <div className="resizable-grid__controls-section">
-              <div className="resizable-grid__controls-section-title">ASCII</div>
-              <label className="resizable-grid__control-row">
-                cols
-                <input
-                  type="number"
-                  min={1}
-                  max={512}
-                  step={1}
-                  value={v03ResolutionCols}
-                  onChange={handleV03ResolutionColsChange}
-                />
-              </label>
-              <label className="resizable-grid__control-row">
-                rows
-                <input
-                  type="number"
-                  min={1}
-                  max={512}
-                  step={1}
-                  value={v03ResolutionRows}
-                  onChange={handleV03ResolutionRowsChange}
-                />
-              </label>
-            </div>
-          ) : null}
+          <div className="resizable-grid__controls-section">
+            <div className="resizable-grid__controls-section-title">Flocking</div>
+            <label className="resizable-grid__control-row">
+              hash cell
+              <input
+                type="number"
+                min={1}
+                max={512}
+                step={1}
+                value={v02HashCellSize}
+                onChange={handleV02HashCellSizeChange}
+              />
+            </label>
+            <label className="resizable-grid__control-row">
+              sep radius
+              <input
+                type="number"
+                min={1}
+                max={500}
+                step={1}
+                value={v02SepRadius}
+                onChange={handleV02SepRadiusChange}
+              />
+            </label>
+            <label className="resizable-grid__control-row">
+              align radius
+              <input
+                type="number"
+                min={1}
+                max={500}
+                step={1}
+                value={v02AlignRadius}
+                onChange={handleV02AlignRadiusChange}
+              />
+            </label>
+            <label className="resizable-grid__control-row">
+              cohesion radius
+              <input
+                type="number"
+                min={1}
+                max={500}
+                step={1}
+                value={v02CohesionRadius}
+                onChange={handleV02CohesionRadiusChange}
+              />
+            </label>
+            <label className="resizable-grid__control-row">
+              sep weight
+              <input
+                type="number"
+                min={0}
+                max={10}
+                step={0.05}
+                value={v02SepWeight}
+                onChange={handleV02SepWeightChange}
+              />
+            </label>
+            <label className="resizable-grid__control-row">
+              align weight
+              <input
+                type="number"
+                min={0}
+                max={10}
+                step={0.05}
+                value={v02AlignWeight}
+                onChange={handleV02AlignWeightChange}
+              />
+            </label>
+            <label className="resizable-grid__control-row">
+              cohesion weight
+              <input
+                type="number"
+                min={0}
+                max={10}
+                step={0.05}
+                value={v02CohesionWeight}
+                onChange={handleV02CohesionWeightChange}
+              />
+            </label>
+          </div>
         </div>
       ) : null}
     </div>

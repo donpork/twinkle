@@ -14,8 +14,7 @@
     "lygia": "^1.4.1",
     "p5": "^2.2.3",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5",
-    "textmode.js": "^0.12.0"
+    "react-dom": "^19.2.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

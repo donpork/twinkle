@@ -1,6 +1,6 @@
 import p5 from 'p5'
 import type { MutableRefObject } from 'react'
-import type { SceneData } from '../../types/grid'
+import type { SharedSceneData } from '../../types/grid'
 
 // ---------------------------------------------------------------------------
 // Shader sources
@@ -86,7 +86,7 @@ export const CELL_COLORS = new Map<string, [number, number, number]>([
 // ---------------------------------------------------------------------------
 
 export function createGridShaderSketch(
-  dataRef: MutableRefObject<SceneData>,
+  dataRef: MutableRefObject<SharedSceneData>,
   getHost: () => HTMLElement | null,
 ) {
   return (p: p5) => {

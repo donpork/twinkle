@@ -1,6 +1,6 @@
 import p5 from 'p5'
 import type { MutableRefObject } from 'react'
-import type { SceneData } from '../../types/grid'
+import type { V02SceneData } from '../../types/grid'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -200,7 +200,9 @@ function v02HsvToRgb(h: number, s: number, v: number): [number, number, number] 
   const c = v * s
   const x = c * (1 - Math.abs((hue / 60) % 2 - 1))
   const m = v - c
-  let rp = 0, gp = 0, bp = 0
+  let rp: number
+  let gp: number
+  let bp: number
   if (hue < 60) [rp, gp, bp] = [c, x, 0]
   else if (hue < 120) [rp, gp, bp] = [x, c, 0]
   else if (hue < 180) [rp, gp, bp] = [0, c, x]
@@ -449,6 +451,10 @@ function v02SpawnUpToMinimum(
   dirX: number, dirY: number,
 ) {
   const target = Math.min(Math.max(0, Math.floor(minLiveBoids)), MAX_BOIDS_HARD)
+  if (boids.length > target) {
+    boids.splice(0, boids.length - target)
+    return
+  }
   if (boids.length >= target) return
   const toAdd = Math.min(SPAWN_BATCH_PER_FRAME, target - boids.length)
   for (let i = 0; i < toAdd; i++) {
@@ -462,7 +468,7 @@ function v02SpawnUpToMinimum(
 // ---------------------------------------------------------------------------
 
 export function createBoidSketch(
-  dataRef: MutableRefObject<SceneData>,
+  dataRef: MutableRefObject<V02SceneData>,
   getHost: () => HTMLElement | null,
 ) {
   return (p: p5) => {

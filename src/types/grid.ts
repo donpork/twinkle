@@ -1,5 +1,5 @@
 export type CellType = 'normal' | 'super' | 'micro' | 'empty'
-export type CellVersion = 'v02' | 'v03'
+export type CellVersion = 'v02'
 
 export interface LayoutCellDef {
   id: string
@@ -17,14 +17,22 @@ export interface CellRect {
   h: number
 }
 
-export interface SceneData {
+/** Fields written by the shared DOM/pointer collector into every version store. */
+export interface SharedSceneData {
   cellRects: Map<string, CellRect>
   containerRects: Map<string, CellRect>
-  labelRect: CellRect | null
   lightPos: { x: number; y: number }
   pointerOverSurface: boolean
   pointerDown: boolean
   mouseReleasedTick: number
+  lastDirection: { x: number; y: number }
+  invertSpeedProfile: boolean
+  cellVersion: CellVersion
+}
+
+/** Runtime data store for the v02 (boids) version. */
+export interface V02SceneData extends SharedSceneData {
+  labelRect: CellRect | null
   deathDistancePx: number
   minLiveBoids: number
   boidBlurPx: number
@@ -40,9 +48,5 @@ export interface SceneData {
   v02CohesionWeight: number
   v02CenterSpeed: number
   v02LifeCycleFrames: number
-  v03ResolutionCols: number
-  v03ResolutionRows: number
-  lastDirection: { x: number; y: number }
-  invertSpeedProfile: boolean
-  cellVersion: CellVersion
 }
+
