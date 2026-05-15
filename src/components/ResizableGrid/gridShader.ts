@@ -1,6 +1,7 @@
 import p5 from 'p5'
 import type { MutableRefObject } from 'react'
 import type { SharedSceneData } from '../../types/grid'
+import { Hct, argbFromHex, blueFromArgb, greenFromArgb, redFromArgb } from '@material/material-color-utilities'
 
 // ---------------------------------------------------------------------------
 // Shader sources
@@ -68,20 +69,6 @@ void main() {
 `
 
 // ---------------------------------------------------------------------------
-// Per-cell colors
-// ---------------------------------------------------------------------------
-
-export const CELL_COLORS = new Map<string, [number, number, number]>([
-  ['1-1', [0.075, 0.012, 0.012]],  // Sienna tone 2
-  ['0-0', [0.22, 0.42, 0.82]],  // royal blue  — the large super cell
-  ['0-2', [0.80, 0.28, 0.20]],  // coral red
-  ['1-2', [0.16, 0.70, 0.46]],  // emerald
-  ['2-0', [0.82, 0.60, 0.08]],  // amber
-  ['2-1', [0.52, 0.18, 0.82]],  // violet
-  ['2-2', [0.10, 0.68, 0.80]],  // cyan
-])
-
-// ---------------------------------------------------------------------------
 // Sketch factory — cell background fills only
 // ---------------------------------------------------------------------------
 
@@ -111,15 +98,22 @@ export function createGridShaderSketch(
       p.shader(sh)
       p.noStroke()
 
-      const { containerRects, lightPos } = dataRef.current
+      const { containerRects, lightPos, themeSeedHex } = dataRef.current
+      const seedArgb = argbFromHex(themeSeedHex)
+      const seedHct = Hct.fromInt(seedArgb)
+      const bgArgb = Hct.from(seedHct.hue, seedHct.chroma, 10).toInt()
+      const bgColor: [number, number, number] = [
+        redFromArgb(bgArgb) / 255,
+        greenFromArgb(bgArgb) / 255,
+        blueFromArgb(bgArgb) / 255,
+      ]
 
-      for (const [id, c] of containerRects) {
+      for (const c of containerRects.values()) {
         if (c.w <= 0 || c.h <= 0) continue
-        const color = CELL_COLORS.get(id) ?? ([0.5, 0.5, 0.5] as [number, number, number])
 
         sh.setUniform('uResolution', [p.width, p.height])
         sh.setUniform('uCellRect', [c.x, c.y, c.w, c.h])
-        sh.setUniform('uColor', color)
+        sh.setUniform('uColor', bgColor)
         sh.setUniform('uLightPos', [lightPos.x, lightPos.y])
         sh.setUniform('uBlurPx', blurPx)
 

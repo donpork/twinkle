@@ -70,23 +70,27 @@ export function ResizableGrid() {
 
   // ---- v02 controls ----
   const [v02DeathDist, setV02DeathDist] = useState(3)
-  const [v02MinLiveBoids, setV02MinLiveBoids] = useState(100)
-  const [v02BoidLength, setV02BoidLength] = useState(1)
+  const [v02MinLiveBoids, setV02MinLiveBoids] = useState(2000)
+  const [v02BoidLength, setV02BoidLength] = useState(2)
   const [v02BoidLineLength, setV02BoidLineLength] = useState(6)
-  const [v02EdgeVelocityMultiplier, setV02EdgeVelocityMultiplier] = useState(0.3)
-  const [v02HashCellSize, setV02HashCellSize] = useState(44)
-  const [v02SepRadius, setV02SepRadius] = useState(18)
+  const [v02EdgeVelocityMultiplier, setV02EdgeVelocityMultiplier] = useState(0)
+  const [v02HashCellSize, setV02HashCellSize] = useState(20)
+  const [v02SepRadius, setV02SepRadius] = useState(80)
   const [v02AlignRadius, setV02AlignRadius] = useState(44)
-  const [v02CohesionRadius, setV02CohesionRadius] = useState(44)
-  const [v02SepWeight, setV02SepWeight] = useState(1.45)
-  const [v02AlignWeight, setV02AlignWeight] = useState(1.0)
-  const [v02CohesionWeight, setV02CohesionWeight] = useState(1.0)
-  const [v02CenterSpeed, setV02CenterSpeed] = useState(0.03)
-  const [v02LifeCycleFrames, setV02LifeCycleFrames] = useState(900)
+  const [v02CohesionRadius, setV02CohesionRadius] = useState(60)
+  const [v02SepWeight, setV02SepWeight] = useState(1.2)
+  const [v02AlignWeight, setV02AlignWeight] = useState(1.8)
+  const [v02CohesionWeight, setV02CohesionWeight] = useState(0.8)
+  const [v02CenterSpeed, setV02CenterSpeed] = useState(0.3)
+  const [v02LifeCycleFrames, setV02LifeCycleFrames] = useState(400)
+  const [v02FlowFollowsPointer, setV02FlowFollowsPointer] = useState(false)
+  const [v02ConstantSpeedAtCenter, setV02ConstantSpeedAtCenter] = useState(true)
+  const [v02ConstantDirectionDeg, setV02ConstantDirectionDeg] = useState(135)
 
   const [showDebug, setShowDebug] = useState(false)
   const [showControls, setShowControls] = useState(true)
   const [focusRect, setFocusRect] = useState<CellRect | null>(null)
+  const [themeSeedHex, setThemeSeedHex] = useState('#2a0900')
 
   // ---- Independent runtime data stores — mutated in place, never trigger re-render ----
   const v02DataRef = useRef<V02SceneData>({
@@ -94,6 +98,7 @@ export function ResizableGrid() {
     containerRects: new Map(),
     labelRect: null,
     lightPos: { x: -1, y: -1 },
+    themeSeedHex: '#2a0900',
     pointerOverSurface: false,
     pointerDown: false,
     mouseReleasedTick: 0,
@@ -101,24 +106,52 @@ export function ResizableGrid() {
     invertSpeedProfile: false,
     cellVersion: 'v02',
     deathDistancePx: 3,
-    minLiveBoids: 100,
+    minLiveBoids: 2000,
     boidBlurPx: 4,
-    v02BoidLength: 1,
+    v02BoidLength: 2,
     v02BoidLineLength: 6,
-    v02EdgeVelocityMultiplier: 0.3,
-    v02HashCellSize: 44,
-    v02SepRadius: 18,
+    v02EdgeVelocityMultiplier: 0,
+    v02HashCellSize: 20,
+    v02SepRadius: 80,
     v02AlignRadius: 44,
-    v02CohesionRadius: 44,
-    v02SepWeight: 1.45,
-    v02AlignWeight: 1.0,
-    v02CohesionWeight: 1.0,
-    v02CenterSpeed: 0.03,
-    v02LifeCycleFrames: 900,
+    v02CohesionRadius: 60,
+    v02SepWeight: 1.2,
+    v02AlignWeight: 1.8,
+    v02CohesionWeight: 0.8,
+    v02CenterSpeed: 0.3,
+    v02LifeCycleFrames: 400,
+    v02FlowFollowsPointer: false,
+    v02ConstantSpeedAtCenter: true,
+    v02ConstantDirectionDeg: 135,
+    mouseRawVelX: 0,
+    mouseRawVelY: 0,
+    mouseFleeRadius: 130,
+    mouseAlignRadius: 160,
+    mouseAttractRadius: 140,
+    mouseFleeWeight: 3,
+    mouseAlignWeight: 1.8,
+    mouseAttractWeight: 4,
+    mouseWakeOffset: 90,
+    mouseAccelSensitivity: 4,
+    mouseMinSpeed: 0.2,
   })
+
+  // ---- Mouse influence controls ----
+  const [mouseFleeRadius, setMouseFleeRadius] = useState(130)
+  const [mouseAlignRadius, setMouseAlignRadius] = useState(160)
+  const [mouseAttractRadius, setMouseAttractRadius] = useState(140)
+  const [mouseFleeWeight, setMouseFleeWeight] = useState(3)
+  const [mouseAlignWeight, setMouseAlignWeight] = useState(1.8)
+  const [mouseAttractWeight, setMouseAttractWeight] = useState(4)
+  const [mouseWakeOffset, setMouseWakeOffset] = useState(90)
+  const [mouseAccelSensitivity, setMouseAccelSensitivity] = useState(4)
+  const [mouseMinSpeed, setMouseMinSpeed] = useState(0.2)
 
   // Active drag state (stored in ref to avoid re-renders during pointermove).
   const dragRef = useRef<DragState | null>(null)
+
+  // Previous pointer position for raw velocity computation.
+  const prevLightPosRef = useRef<{ x: number; y: number }>({ x: -1, y: -1 })
 
   // -------------------------------------------------------------------------
   // Root ResizeObserver — updates `box` so the layoutEffect re-runs.
@@ -362,16 +395,28 @@ export function ResizableGrid() {
     v02DataRef.current.lightPos = lightPos
     v02DataRef.current.pointerOverSurface = true
 
-    const target = v02DataRef.current.containerRects.get('1-1')
-    if (target) {
-      const cx = target.x + target.w * 0.5
-      const cy = target.y + target.h * 0.5
-      const dx = lightPos.x - cx
-      const dy = lightPos.y - cy
-      const mag = Math.hypot(dx, dy)
-      if (mag > 1) {
-        const dir = { x: dx / mag, y: dy / mag }
-        v02DataRef.current.lastDirection = dir
+    const prev = prevLightPosRef.current
+    if (prev.x >= 0) {
+      v02DataRef.current.mouseRawVelX = lightPos.x - prev.x
+      v02DataRef.current.mouseRawVelY = lightPos.y - prev.y
+    } else {
+      v02DataRef.current.mouseRawVelX = 0
+      v02DataRef.current.mouseRawVelY = 0
+    }
+    prevLightPosRef.current = { x: lightPos.x, y: lightPos.y }
+
+    if (v02DataRef.current.v02FlowFollowsPointer) {
+      const target = v02DataRef.current.containerRects.get('1-1')
+      if (target) {
+        const cx = target.x + target.w * 0.5
+        const cy = target.y + target.h * 0.5
+        const dx = lightPos.x - cx
+        const dy = lightPos.y - cy
+        const mag = Math.hypot(dx, dy)
+        if (mag > 1) {
+          const dir = { x: dx / mag, y: dy / mag }
+          v02DataRef.current.lastDirection = dir
+        }
       }
     }
   }
@@ -380,6 +425,9 @@ export function ResizableGrid() {
     v02DataRef.current.lightPos = { x: -1, y: -1 }
     v02DataRef.current.pointerOverSurface = false
     v02DataRef.current.pointerDown = false
+    v02DataRef.current.mouseRawVelX = 0
+    v02DataRef.current.mouseRawVelY = 0
+    prevLightPosRef.current = { x: -1, y: -1 }
   }
 
   const handlePointerDown = useCallback(() => {
@@ -478,8 +526,70 @@ export function ResizableGrid() {
     v02DataRef.current.v02LifeCycleFrames = v
   }
 
+  function handleV02FlowFollowsPointerChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = e.target.checked
+    setV02FlowFollowsPointer(v)
+    v02DataRef.current.v02FlowFollowsPointer = v
+  }
+
+  function handleV02ConstantSpeedAtCenterChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = e.target.checked
+    setV02ConstantSpeedAtCenter(v)
+    v02DataRef.current.v02ConstantSpeedAtCenter = v
+  }
+
+  function handleV02ConstantDirectionDegChange(e: ChangeEvent<HTMLInputElement>) {
+    const raw = Number(e.target.value)
+    const v = Number.isFinite(raw) ? ((raw % 360) + 360) % 360 : 0
+    setV02ConstantDirectionDeg(v)
+    v02DataRef.current.v02ConstantDirectionDeg = v
+  }
+
+  function handleMouseFleeRadiusChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(1, Number(e.target.value))
+    setMouseFleeRadius(v); v02DataRef.current.mouseFleeRadius = v
+  }
+  function handleMouseAlignRadiusChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(1, Number(e.target.value))
+    setMouseAlignRadius(v); v02DataRef.current.mouseAlignRadius = v
+  }
+  function handleMouseAttractRadiusChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(1, Number(e.target.value))
+    setMouseAttractRadius(v); v02DataRef.current.mouseAttractRadius = v
+  }
+  function handleMouseFleeWeightChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(0, Number(e.target.value))
+    setMouseFleeWeight(v); v02DataRef.current.mouseFleeWeight = v
+  }
+  function handleMouseAlignWeightChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(0, Number(e.target.value))
+    setMouseAlignWeight(v); v02DataRef.current.mouseAlignWeight = v
+  }
+  function handleMouseAttractWeightChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(0, Number(e.target.value))
+    setMouseAttractWeight(v); v02DataRef.current.mouseAttractWeight = v
+  }
+  function handleMouseWakeOffsetChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(0, Number(e.target.value))
+    setMouseWakeOffset(v); v02DataRef.current.mouseWakeOffset = v
+  }
+  function handleMouseAccelSensitivityChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(0, Number(e.target.value))
+    setMouseAccelSensitivity(v); v02DataRef.current.mouseAccelSensitivity = v
+  }
+  function handleMouseMinSpeedChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(0, Number(e.target.value))
+    setMouseMinSpeed(v); v02DataRef.current.mouseMinSpeed = v
+  }
+
   function handleShowDebugChange(e: ChangeEvent<HTMLInputElement>) {
     setShowDebug(e.target.checked)
+  }
+
+  function handleThemeSeedHexChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = e.target.value
+    setThemeSeedHex(v)
+    v02DataRef.current.themeSeedHex = v
   }
 
   return (
@@ -606,6 +716,7 @@ export function ResizableGrid() {
       <button
         type="button"
         className="resizable-grid__controls-toggle"
+        title="Show or hide the floating parameter panel."
         onClick={() => setShowControls(v => !v)}
       >
         {showControls ? 'hide controls' : 'show controls'}
@@ -613,11 +724,24 @@ export function ResizableGrid() {
 
       {showControls ? (
         <div className="resizable-grid__controls-group">
-          <div className="resizable-grid__controls-meta">Preset: {layout.name}</div>
+          <div
+            className="resizable-grid__controls-meta"
+            title="Name of the fixed layout preset used for rows, columns, and cells."
+          >
+            Preset: {layout.name}
+          </div>
 
           <div className="resizable-grid__controls-section">
-            <div className="resizable-grid__controls-section-title">Global</div>
-            <label className="resizable-grid__control-row">
+            <div
+              className="resizable-grid__controls-section-title"
+              title="Parameters that apply to the whole scene or simulation lifecycle."
+            >
+              Global
+            </div>
+            <label
+              className="resizable-grid__control-row"
+              title="How far outside the pill-shaped cell boids may drift before they are removed (pixels). Larger values keep particles alive near rounded corners."
+            >
               edge buffer (px)
               <input
                 type="number"
@@ -627,7 +751,10 @@ export function ResizableGrid() {
                 onChange={handleV02DeathDistChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Lower bound on the number of boids; the sim respawns in small batches each frame until this count is reached."
+            >
               min live
               <input
                 type="number"
@@ -637,7 +764,21 @@ export function ResizableGrid() {
                 onChange={handleV02MinLiveChange}
               />
             </label>
-            <label className="resizable-grid__control-row resizable-grid__control-row--checkbox">
+            <label
+              className="resizable-grid__control-row"
+              title="Material seed color used to derive cell background and boid HCT colors."
+            >
+              seed color
+              <input
+                type="color"
+                value={themeSeedHex}
+                onChange={handleThemeSeedHexChange}
+              />
+            </label>
+            <label
+              className="resizable-grid__control-row resizable-grid__control-row--checkbox"
+              title="Draws debug outlines for the grid, cells, and alignment helpers."
+            >
               debug
               <input
                 type="checkbox"
@@ -648,8 +789,54 @@ export function ResizableGrid() {
           </div>
 
           <div className="resizable-grid__controls-section">
-            <div className="resizable-grid__controls-section-title">Boids</div>
-            <label className="resizable-grid__control-row">
+            <div
+              className="resizable-grid__controls-section-title"
+              title="Drawing style, speed scaling, and global steering for the particle lines."
+            >
+              Boids
+            </div>
+            <label
+              className="resizable-grid__control-row resizable-grid__control-row--checkbox"
+              title="When on, the global flow direction and newly spawned boids follow the vector from the focus cell center toward the cursor. When off, that direction stays at its last value until you turn this back on."
+            >
+              flow follows pointer
+              <input
+                type="checkbox"
+                checked={v02FlowFollowsPointer}
+                onChange={handleV02FlowFollowsPointerChange}
+              />
+            </label>
+            <label
+              className="resizable-grid__control-row resizable-grid__control-row--checkbox"
+              title="When on, boid speed stays fixed to the center speed value and ignores cursor-distance speed scaling."
+            >
+              constant speed (center rate)
+              <input
+                type="checkbox"
+                checked={v02ConstantSpeedAtCenter}
+                onChange={handleV02ConstantSpeedAtCenterChange}
+              />
+            </label>
+            {v02ConstantSpeedAtCenter ? (
+              <label
+                className="resizable-grid__control-row"
+                title="Heading for boids in constant speed mode. 0° points up from the center and values rotate clockwise."
+              >
+                constant direction (deg)
+                <input
+                  type="number"
+                  min={0}
+                  max={360}
+                  step={1}
+                  value={v02ConstantDirectionDeg}
+                  onChange={handleV02ConstantDirectionDegChange}
+                />
+              </label>
+            ) : null}
+            <label
+              className="resizable-grid__control-row"
+              title="Scales how much cursor position (near cell edge vs near center) changes the flock speed cap."
+            >
               edge speed x
               <input
                 type="number"
@@ -660,7 +847,10 @@ export function ResizableGrid() {
                 onChange={handleV02EdgeVelocityMultiplierChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Minimum speed scale when the cursor sits near the cell center; blends with edge speed toward the rim."
+            >
               center speed
               <input
                 type="number"
@@ -671,7 +861,10 @@ export function ResizableGrid() {
                 onChange={handleV02CenterSpeedChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Maximum age of a boid in frames; older boids are removed even if still inside the cell."
+            >
               life frames
               <input
                 type="number"
@@ -682,7 +875,10 @@ export function ResizableGrid() {
                 onChange={handleV02LifeCycleFramesChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Stroke weight (pixels) for each boid line segment."
+            >
               stroke width
               <input
                 type="number"
@@ -693,7 +889,10 @@ export function ResizableGrid() {
                 onChange={handleV02BoidLengthChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Multiplier for how long each line is along the velocity direction (visual trail length)."
+            >
               boid length
               <input
                 type="number"
@@ -707,8 +906,16 @@ export function ResizableGrid() {
           </div>
 
           <div className="resizable-grid__controls-section">
-            <div className="resizable-grid__controls-section-title">Flocking</div>
-            <label className="resizable-grid__control-row">
+            <div
+              className="resizable-grid__controls-section-title"
+              title="Classic boids rules: each boid looks at neighbors within these radii and weights."
+            >
+              Flocking
+            </div>
+            <label
+              className="resizable-grid__control-row"
+              title="Side length of each spatial-hash bucket (pixels). Smaller buckets mean more precise neighbor queries and more work per frame."
+            >
               hash cell
               <input
                 type="number"
@@ -719,7 +926,10 @@ export function ResizableGrid() {
                 onChange={handleV02HashCellSizeChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Distance within which boids apply separation (avoid crowding)."
+            >
               sep radius
               <input
                 type="number"
@@ -730,7 +940,10 @@ export function ResizableGrid() {
                 onChange={handleV02SepRadiusChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Distance within which boids match neighbors average velocity."
+            >
               align radius
               <input
                 type="number"
@@ -741,7 +954,10 @@ export function ResizableGrid() {
                 onChange={handleV02AlignRadiusChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Distance within which boids steer toward the centroid of neighbors."
+            >
               cohesion radius
               <input
                 type="number"
@@ -752,7 +968,10 @@ export function ResizableGrid() {
                 onChange={handleV02CohesionRadiusChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Strength multiplier for the separation steering force."
+            >
               sep weight
               <input
                 type="number"
@@ -763,7 +982,10 @@ export function ResizableGrid() {
                 onChange={handleV02SepWeightChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Strength multiplier for the alignment steering force."
+            >
               align weight
               <input
                 type="number"
@@ -774,7 +996,10 @@ export function ResizableGrid() {
                 onChange={handleV02AlignWeightChange}
               />
             </label>
-            <label className="resizable-grid__control-row">
+            <label
+              className="resizable-grid__control-row"
+              title="Strength multiplier for the cohesion steering force."
+            >
               cohesion weight
               <input
                 type="number"
@@ -784,6 +1009,78 @@ export function ResizableGrid() {
                 value={v02CohesionWeight}
                 onChange={handleV02CohesionWeightChange}
               />
+            </label>
+          </div>
+
+          <div className="resizable-grid__controls-section">
+            <div
+              className="resizable-grid__controls-section-title"
+              title="Extra forces from the cursor: flee, align with motion, and attract to a wake point behind the pointer."
+            >
+              Mouse
+            </div>
+            <label
+              className="resizable-grid__control-row"
+              title="Radius around the cursor where boids gain an outward flee force (scaled by pointer speed and acceleration)."
+            >
+              flee radius
+              <input type="number" min={1} max={800} step={1} value={mouseFleeRadius} onChange={handleMouseFleeRadiusChange} />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="Radius within which boids steer to match the smoothed on-screen pointer velocity (only when pointer is moving faster than min speed)."
+            >
+              align radius
+              <input type="number" min={1} max={800} step={1} value={mouseAlignRadius} onChange={handleMouseAlignRadiusChange} />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="Radius within which boids are gently pulled toward a point behind the cursor along its motion (wake)."
+            >
+              attract radius
+              <input type="number" min={1} max={800} step={1} value={mouseAttractRadius} onChange={handleMouseAttractRadiusChange} />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="How strong the flee force is relative to other mouse terms."
+            >
+              flee weight
+              <input type="number" min={0} max={10} step={0.05} value={mouseFleeWeight} onChange={handleMouseFleeWeightChange} />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="How strongly boids align with smoothed pointer motion inside the align radius."
+            >
+              align weight
+              <input type="number" min={0} max={10} step={0.05} value={mouseAlignWeight} onChange={handleMouseAlignWeightChange} />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="How strongly boids are pulled toward the wake attractor inside the attract radius."
+            >
+              attract weight
+              <input type="number" min={0} max={10} step={0.05} value={mouseAttractWeight} onChange={handleMouseAttractWeightChange} />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="Distance behind the cursor, along smoothed motion, where the attract target is placed (pixels)."
+            >
+              wake offset (px)
+              <input type="number" min={0} max={400} step={1} value={mouseWakeOffset} onChange={handleMouseWakeOffsetChange} />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="Boosts flee strength when the pointer accelerates quickly (larger reacts more to sharp movements)."
+            >
+              accel sensitivity
+              <input type="number" min={0} max={10} step={0.1} value={mouseAccelSensitivity} onChange={handleMouseAccelSensitivityChange} />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="Smoothed pointer speed below this threshold disables align and attract so idle hover does not tug the flock."
+            >
+              min speed
+              <input type="number" min={0} max={20} step={0.1} value={mouseMinSpeed} onChange={handleMouseMinSpeedChange} />
             </label>
           </div>
         </div>
