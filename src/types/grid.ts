@@ -59,13 +59,10 @@ export interface V02SceneData extends SharedSceneData {
   mouseRawVelX: number
   mouseRawVelY: number
   // Mouse influence radii and weights
-  mouseFleeRadius: number
   mouseAlignRadius: number
   mouseAttractRadius: number
-  mouseFleeWeight: number
   mouseAlignWeight: number
   mouseAttractWeight: number
-  mouseWakeOffset: number
   mouseAccelSensitivity: number
   mouseMinSpeed: number
 }

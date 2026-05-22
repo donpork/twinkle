@@ -125,27 +125,21 @@ export function ResizableGrid() {
     v02ConstantDirectionDeg: 135,
     mouseRawVelX: 0,
     mouseRawVelY: 0,
-    mouseFleeRadius: 130,
     mouseAlignRadius: 160,
-    mouseAttractRadius: 140,
-    mouseFleeWeight: 3,
-    mouseAlignWeight: 1.8,
-    mouseAttractWeight: 4,
-    mouseWakeOffset: 90,
-    mouseAccelSensitivity: 4,
-    mouseMinSpeed: 0.2,
+    mouseAttractRadius: 180,
+    mouseAlignWeight: 2,
+    mouseAttractWeight: 5,
+    mouseAccelSensitivity: 3.5,
+    mouseMinSpeed: 0.3,
   })
 
   // ---- Mouse influence controls ----
-  const [mouseFleeRadius, setMouseFleeRadius] = useState(130)
   const [mouseAlignRadius, setMouseAlignRadius] = useState(160)
-  const [mouseAttractRadius, setMouseAttractRadius] = useState(140)
-  const [mouseFleeWeight, setMouseFleeWeight] = useState(3)
-  const [mouseAlignWeight, setMouseAlignWeight] = useState(1.8)
-  const [mouseAttractWeight, setMouseAttractWeight] = useState(4)
-  const [mouseWakeOffset, setMouseWakeOffset] = useState(90)
-  const [mouseAccelSensitivity, setMouseAccelSensitivity] = useState(4)
-  const [mouseMinSpeed, setMouseMinSpeed] = useState(0.2)
+  const [mouseAttractRadius, setMouseAttractRadius] = useState(180)
+  const [mouseAlignWeight, setMouseAlignWeight] = useState(2)
+  const [mouseAttractWeight, setMouseAttractWeight] = useState(5)
+  const [mouseAccelSensitivity, setMouseAccelSensitivity] = useState(3.5)
+  const [mouseMinSpeed, setMouseMinSpeed] = useState(0.3)
 
   // Active drag state (stored in ref to avoid re-renders during pointermove).
   const dragRef = useRef<DragState | null>(null)
@@ -545,10 +539,6 @@ export function ResizableGrid() {
     v02DataRef.current.v02ConstantDirectionDeg = v
   }
 
-  function handleMouseFleeRadiusChange(e: ChangeEvent<HTMLInputElement>) {
-    const v = Math.max(1, Number(e.target.value))
-    setMouseFleeRadius(v); v02DataRef.current.mouseFleeRadius = v
-  }
   function handleMouseAlignRadiusChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(1, Number(e.target.value))
     setMouseAlignRadius(v); v02DataRef.current.mouseAlignRadius = v
@@ -557,10 +547,6 @@ export function ResizableGrid() {
     const v = Math.max(1, Number(e.target.value))
     setMouseAttractRadius(v); v02DataRef.current.mouseAttractRadius = v
   }
-  function handleMouseFleeWeightChange(e: ChangeEvent<HTMLInputElement>) {
-    const v = Math.max(0, Number(e.target.value))
-    setMouseFleeWeight(v); v02DataRef.current.mouseFleeWeight = v
-  }
   function handleMouseAlignWeightChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Number(e.target.value))
     setMouseAlignWeight(v); v02DataRef.current.mouseAlignWeight = v
@@ -568,10 +554,6 @@ export function ResizableGrid() {
   function handleMouseAttractWeightChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Number(e.target.value))
     setMouseAttractWeight(v); v02DataRef.current.mouseAttractWeight = v
-  }
-  function handleMouseWakeOffsetChange(e: ChangeEvent<HTMLInputElement>) {
-    const v = Math.max(0, Number(e.target.value))
-    setMouseWakeOffset(v); v02DataRef.current.mouseWakeOffset = v
   }
   function handleMouseAccelSensitivityChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(0, Number(e.target.value))
@@ -1021,13 +1003,6 @@ export function ResizableGrid() {
             </div>
             <label
               className="resizable-grid__control-row"
-              title="Radius around the cursor where boids gain an outward flee force (scaled by pointer speed and acceleration)."
-            >
-              flee radius
-              <input type="number" min={1} max={800} step={1} value={mouseFleeRadius} onChange={handleMouseFleeRadiusChange} />
-            </label>
-            <label
-              className="resizable-grid__control-row"
               title="Radius within which boids steer to match the smoothed on-screen pointer velocity (only when pointer is moving faster than min speed)."
             >
               align radius
@@ -1039,13 +1014,6 @@ export function ResizableGrid() {
             >
               attract radius
               <input type="number" min={1} max={800} step={1} value={mouseAttractRadius} onChange={handleMouseAttractRadiusChange} />
-            </label>
-            <label
-              className="resizable-grid__control-row"
-              title="How strong the flee force is relative to other mouse terms."
-            >
-              flee weight
-              <input type="number" min={0} max={10} step={0.05} value={mouseFleeWeight} onChange={handleMouseFleeWeightChange} />
             </label>
             <label
               className="resizable-grid__control-row"
@@ -1063,14 +1031,7 @@ export function ResizableGrid() {
             </label>
             <label
               className="resizable-grid__control-row"
-              title="Distance behind the cursor, along smoothed motion, where the attract target is placed (pixels)."
-            >
-              wake offset (px)
-              <input type="number" min={0} max={400} step={1} value={mouseWakeOffset} onChange={handleMouseWakeOffsetChange} />
-            </label>
-            <label
-              className="resizable-grid__control-row"
-              title="Boosts flee strength when the pointer accelerates quickly (larger reacts more to sharp movements)."
+              title="Boosts pursuit strength when the pointer accelerates quickly (larger reacts more to sharp movements)."
             >
               accel sensitivity
               <input type="number" min={0} max={10} step={0.1} value={mouseAccelSensitivity} onChange={handleMouseAccelSensitivityChange} />

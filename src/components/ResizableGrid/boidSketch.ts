@@ -15,7 +15,6 @@ const SPAWN_SPEED_BASE = 1.25
 const MAX_SPEED_BASE = 2.8
 const MAX_FORCE_BASE = 0.075
 const FLOW_WEIGHT = 0.4
-const MOUSE_FLEE_BASE_FORCE = 0.18
 const MOUSE_REPEL_RADIUS = 88
 const MOUSE_REPEL_FORCE = 3.4
 const MOUSE_REPEL_GROWTH_PER_FRAME = 0.03
@@ -138,6 +137,7 @@ interface Boid {
   age: number
   maxAge: number
   disruption: number
+  proximityFraction: number
   sepStrength: number
   alignStrength: number
   cohesionStrength: number
@@ -221,6 +221,7 @@ function v02MakeDirectionalBoid(x: number, y: number, dirX: number, dirY: number
     age: Math.floor(Math.random() * lifeCycleFrames),
     maxAge: Math.floor(lifeCycleFrames * (0.75 + Math.random() * 0.5)),
     disruption: 0,
+    proximityFraction: 0,
     sepStrength: 0, alignStrength: 0, cohesionStrength: 0,
     colorR: -1, colorG: -1, colorB: -1,
   }
@@ -297,13 +298,10 @@ function v02FlockAndFilter(
   cohesionWeight: number,
   smVelX: number, smVelY: number,
   mouseSpeed: number, accelMag: number,
-  mouseFleeRadius: number,
   mouseAlignRadius: number,
   mouseAttractRadius: number,
-  mouseFleeWeight: number,
   mouseAlignWeight: number,
   mouseAttractWeight: number,
-  mouseWakeOffset: number,
   mouseAccelSensitivity: number,
   mouseMinSpeed: number,
 ): Boid[] {
@@ -436,23 +434,29 @@ function v02FlockAndFilter(
       }
     }
 
-    if (hasPointer) {
-      // Flee — always active when cursor present, modulated by speed and acceleration burst
-      {
-        const dx = b.x - lx
-        const dy = b.y - ly
-        const dist = Math.hypot(dx, dy)
-        if (dist < mouseFleeRadius && dist > 0.1) {
-          const falloff = 1 - (dist / mouseFleeRadius) ** 2
-          const speedFactor = 1 + Math.min(mouseSpeed / 10, 2.0)
-          const burstScale = 1 + accelMag * mouseAccelSensitivity
-          const strength = mouseFleeWeight * falloff * speedFactor * burstScale
-          mouseDisruption = Math.max(mouseDisruption, falloff * Math.min(speedFactor / 3, 1))
-          b.ax += (dx / dist) * strength * MOUSE_FLEE_BASE_FORCE
-          b.ay += (dy / dist) * strength * MOUSE_FLEE_BASE_FORCE
-        }
-      }
+    {
+      const raw = hasPointer ? Math.max(0, 1 - Math.hypot(b.x - lx, b.y - ly) / (mouseAttractRadius * 1.3)) ** 2 : 0
+      b.proximityFraction = v02Lerp(b.proximityFraction, raw, 0.08)
+    }
 
+    // Pursuit — toward cursor, gated by mouse speed
+    if (hasPointer && mouseSpeed > mouseMinSpeed) {
+      const dx = lx - b.x
+      const dy = ly - b.y
+      const dist = Math.hypot(dx, dy)
+      if (dist < mouseAttractRadius && dist > 0.1) {
+        const falloff = 1 - (dist / mouseAttractRadius) ** 2
+        const speedGate = Math.min(mouseSpeed / 6, 1.0)
+        const urgency = speedGate * (1 + accelMag * mouseAccelSensitivity)
+        const [tx, ty] = v02SetMag(dx, dy, maxSpeed)
+        const [fx, fy] = v02LimitMag(tx - b.vx, ty - b.vy, maxForce)
+        mouseDisruption = Math.max(mouseDisruption, falloff * speedGate)
+        b.ax += fx * mouseAttractWeight * falloff * urgency
+        b.ay += fy * mouseAttractWeight * falloff * urgency
+      }
+    }
+
+    if (hasPointer) {
       // Align to mouse velocity direction — suppressed below minSpeed
       if (mouseSpeed > mouseMinSpeed) {
         const dist = Math.hypot(b.x - lx, b.y - ly)
@@ -463,24 +467,6 @@ function v02FlockAndFilter(
           const [fx, fy] = v02LimitMag(mvx - b.vx, mvy - b.vy, maxForce)
           b.ax += fx * mouseAlignWeight * falloff
           b.ay += fy * mouseAlignWeight * falloff
-        }
-      }
-
-      // Attract to wake point (behind cursor along velocity vector) — suppressed below minSpeed
-      if (mouseSpeed > mouseMinSpeed) {
-        const [nvx, nvy] = v02SetMag(smVelX, smVelY, 1)
-        const wakeX = lx - nvx * mouseWakeOffset
-        const wakeY = ly - nvy * mouseWakeOffset
-        const dx = wakeX - b.x
-        const dy = wakeY - b.y
-        const dist = Math.hypot(dx, dy)
-        if (dist < mouseAttractRadius && dist > 0.1) {
-          const falloff = 1 - (dist / mouseAttractRadius) ** 2
-          mouseDisruption = Math.max(mouseDisruption, falloff * 0.7)
-          const [tx, ty] = v02SetMag(dx, dy, maxSpeed)
-          const [fx, fy] = v02LimitMag(tx - b.vx, ty - b.vy, maxForce)
-          b.ax += fx * mouseAttractWeight * falloff
-          b.ay += fy * mouseAttractWeight * falloff
         }
       }
     }
@@ -514,6 +500,8 @@ function v02DrawAllBoids(
   flowDirY: number,
   constantSpeedMode: boolean,
   targetSpeed: number,
+  lx: number,
+  ly: number,
 ) {
   g.strokeWeight(Math.max(1, v02BoidLength))
   g.noFill()
@@ -529,9 +517,11 @@ function v02DrawAllBoids(
     const hx = ux * lineLen * 0.5
     const hy = uy * lineLen * 0.5
     const speed01 = v02Clamp01(speed / MAX_SPEED_BASE)
-    const angle = Math.atan2(b.vy, b.vx)
-    const angleSigned01 = angle / Math.PI
     const directionDot = v02Clamp01((ux * nx + uy * ny + 1) * 0.5) * 2 - 1
+    const perturbation = Math.max(b.disruption, b.proximityFraction)
+    const adjustedHue = lx >= 0
+      ? seedHct.hue + (Math.atan2(ly - b.y, lx - b.x) / Math.PI) * 18 * perturbation
+      : seedHct.hue
     const targetColor = constantSpeedMode
       ? (() => {
           const angleDelta01 = v02Clamp01((1 - directionDot) * 0.5)
@@ -541,26 +531,24 @@ function v02DrawAllBoids(
           const toneLift =
             angleDelta01 * BOID_CONSTANT_DIR_TONE_LIFT_MAX
             + speedDelta01 * BOID_CONSTANT_SPEED_TONE_LIFT_MAX
-            + b.disruption * BOID_DISRUPTION_TONE_BOOST_MAX
+            + perturbation * BOID_DISRUPTION_TONE_BOOST_MAX
           const tone = Math.min(BOID_PEAK_TONE, BOID_SEED_TONE + toneLift)
           const chromaLift = angleDelta01 * BOID_CONSTANT_DIR_CHROMA_LIFT_MAX
           return v02HctToRgb(
-            seedHct.hue,
+            adjustedHue,
             seedHct.chroma + chromaLift,
             tone,
           )
         })()
       : (() => {
-          const hueShiftRaw = angleSigned01 * BOID_HUE_SHIFT_DEG_MAX + (1 - directionDot) * 10
-          const hueShift = Math.max(-BOID_HUE_SHIFT_DEG_MAX, Math.min(BOID_HUE_SHIFT_DEG_MAX, hueShiftRaw))
           const chromaShiftRaw = (speed01 - 0.5) * (BOID_CHROMA_SHIFT_MAX * 2) + (b.alignStrength - b.sepStrength) * 8
           const chromaShift = Math.max(-BOID_CHROMA_SHIFT_MAX, Math.min(BOID_CHROMA_SHIFT_MAX, chromaShiftRaw))
           const toneShiftRaw = (speed01 - 0.5) * (BOID_TONE_SHIFT_MAX * 2) + b.cohesionStrength * 4
           const toneShiftBase = Math.max(-BOID_TONE_SHIFT_MAX, Math.min(BOID_TONE_SHIFT_MAX, toneShiftRaw))
-          const toneShift = toneShiftBase + b.disruption * BOID_DISRUPTION_TONE_BOOST_MAX
+          const toneShift = toneShiftBase + perturbation * BOID_DISRUPTION_TONE_BOOST_MAX
           const tone = Math.min(BOID_PEAK_TONE, BOID_SEED_TONE + toneShift)
           return v02HctToRgb(
-            seedHct.hue + hueShift,
+            adjustedHue,
             seedHct.chroma + chromaShift,
             tone,
           )
@@ -673,13 +661,10 @@ export function createBoidSketch(
         v02ConstantDirectionDeg,
         mouseRawVelX,
         mouseRawVelY,
-        mouseFleeRadius,
         mouseAlignRadius,
         mouseAttractRadius,
-        mouseFleeWeight,
         mouseAlignWeight,
         mouseAttractWeight,
-        mouseWakeOffset,
         mouseAccelSensitivity,
         mouseMinSpeed,
       } = dataRef.current
@@ -728,6 +713,14 @@ export function createBoidSketch(
         v02ConstantSpeedAtCenter,
       )
 
+      v02SpawnUpToMinimum(
+        v02Boids,
+        minLiveBoids,
+        cell11.x, cell11.y, cell11.w, cell11.h,
+        activeDirX, activeDirY,
+        v02LifeCycleFrames,
+      )
+
       v02Boids = v02FlockAndFilter(
         v02Boids,
         cell11.x, cell11.y, cell11.w, cell11.h,
@@ -747,23 +740,12 @@ export function createBoidSketch(
         v02CohesionWeight,
         smVelX, smVelY,
         mouseSpeed, accelMag,
-        mouseFleeRadius,
         mouseAlignRadius,
         mouseAttractRadius,
-        mouseFleeWeight,
         mouseAlignWeight,
         mouseAttractWeight,
-        mouseWakeOffset,
         mouseAccelSensitivity,
         mouseMinSpeed,
-      )
-
-      v02SpawnUpToMinimum(
-        v02Boids,
-        minLiveBoids,
-        cell11.x, cell11.y, cell11.w, cell11.h,
-        activeDirX, activeDirY,
-        v02LifeCycleFrames,
       )
 
       shockwaves = shockwaves
@@ -781,6 +763,8 @@ export function createBoidSketch(
         activeDirY,
         v02ConstantSpeedAtCenter,
         V02_FIXED_SPEED * v02SpeedScale,
+        lightPos.x,
+        lightPos.y,
       )
 
       p.clear()
