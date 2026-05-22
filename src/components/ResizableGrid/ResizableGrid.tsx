@@ -4,6 +4,7 @@ import { applyAxisPixelDelta, renormalizeToSum, enforceTrackBounds } from './tra
 import type { CellRect, LayoutCellDef, SharedSceneData, V02SceneData } from '../../types/grid'
 import { ShaderCanvas } from './ShaderCanvas'
 import { BoidCanvas } from './BoidCanvas'
+import { Hct, argbFromHex, blueFromArgb, greenFromArgb, redFromArgb } from '@material/material-color-utilities'
 import './ResizableGrid.css'
 
 // ---------------------------------------------------------------------------
@@ -74,7 +75,6 @@ export function ResizableGrid() {
   const [v02BoidLength, setV02BoidLength] = useState(2)
   const [v02BoidLineLength, setV02BoidLineLength] = useState(6)
   const [v02EdgeVelocityMultiplier, setV02EdgeVelocityMultiplier] = useState(0)
-  const [v02HashCellSize, setV02HashCellSize] = useState(20)
   const [v02SepRadius, setV02SepRadius] = useState(80)
   const [v02AlignRadius, setV02AlignRadius] = useState(44)
   const [v02CohesionRadius, setV02CohesionRadius] = useState(60)
@@ -90,7 +90,8 @@ export function ResizableGrid() {
   const [showDebug, setShowDebug] = useState(false)
   const [showControls, setShowControls] = useState(true)
   const [focusRect, setFocusRect] = useState<CellRect | null>(null)
-  const [themeSeedHex, setThemeSeedHex] = useState('#2a0900')
+  const [themeSeedHex, setThemeSeedHex] = useState('#1c2e87')
+  const [pillBgHex, setPillBgHex] = useState('#220a02')
 
   // ---- Independent runtime data stores — mutated in place, never trigger re-render ----
   const v02DataRef = useRef<V02SceneData>({
@@ -98,7 +99,8 @@ export function ResizableGrid() {
     containerRects: new Map(),
     labelRect: null,
     lightPos: { x: -1, y: -1 },
-    themeSeedHex: '#2a0900',
+    themeSeedHex: '#1c2e87',
+    pillBgHex: '#220a02',
     pointerOverSurface: false,
     pointerDown: false,
     mouseReleasedTick: 0,
@@ -111,7 +113,6 @@ export function ResizableGrid() {
     v02BoidLength: 2,
     v02BoidLineLength: 6,
     v02EdgeVelocityMultiplier: 0,
-    v02HashCellSize: 20,
     v02SepRadius: 80,
     v02AlignRadius: 44,
     v02CohesionRadius: 60,
@@ -131,6 +132,7 @@ export function ResizableGrid() {
     mouseAttractWeight: 5,
     mouseAccelSensitivity: 3.5,
     mouseMinSpeed: 0.3,
+    mouseDecayRate: 1 / 90,
   })
 
   // ---- Mouse influence controls ----
@@ -140,6 +142,7 @@ export function ResizableGrid() {
   const [mouseAttractWeight, setMouseAttractWeight] = useState(5)
   const [mouseAccelSensitivity, setMouseAccelSensitivity] = useState(3.5)
   const [mouseMinSpeed, setMouseMinSpeed] = useState(0.3)
+  const [mouseDecayRate, setMouseDecayRate] = useState(1 / 90)
 
   // Active drag state (stored in ref to avoid re-renders during pointermove).
   const dragRef = useRef<DragState | null>(null)
@@ -466,12 +469,6 @@ export function ResizableGrid() {
     v02DataRef.current.v02EdgeVelocityMultiplier = v
   }
 
-  function handleV02HashCellSizeChange(e: ChangeEvent<HTMLInputElement>) {
-    const v = Math.max(1, Math.floor(Number(e.target.value)))
-    setV02HashCellSize(v)
-    v02DataRef.current.v02HashCellSize = v
-  }
-
   function handleV02SepRadiusChange(e: ChangeEvent<HTMLInputElement>) {
     const v = Math.max(1, Number(e.target.value))
     setV02SepRadius(v)
@@ -563,6 +560,10 @@ export function ResizableGrid() {
     const v = Math.max(0, Number(e.target.value))
     setMouseMinSpeed(v); v02DataRef.current.mouseMinSpeed = v
   }
+  function handleMouseDecayRateChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.min(4, Math.max(0.001, Number(e.target.value)))
+    setMouseDecayRate(v); v02DataRef.current.mouseDecayRate = v
+  }
 
   function handleShowDebugChange(e: ChangeEvent<HTMLInputElement>) {
     setShowDebug(e.target.checked)
@@ -573,6 +574,18 @@ export function ResizableGrid() {
     setThemeSeedHex(v)
     v02DataRef.current.themeSeedHex = v
   }
+
+  function handlePillBgHexChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = e.target.value
+    setPillBgHex(v)
+    v02DataRef.current.pillBgHex = v
+  }
+
+  const labelColor = (() => {
+    const seed = Hct.fromInt(argbFromHex(themeSeedHex))
+    const labelArgb = Hct.from(seed.hue, seed.chroma * 0.7, 90).toInt()
+    return `rgb(${redFromArgb(labelArgb)} ${greenFromArgb(labelArgb)} ${blueFromArgb(labelArgb)})`
+  })()
 
   return (
     <div
@@ -608,6 +621,7 @@ export function ResizableGrid() {
             top: focusRect.y,
             width: focusRect.w,
             height: focusRect.h,
+            color: labelColor,
           }}
         >
           R1C1
@@ -748,13 +762,24 @@ export function ResizableGrid() {
             </label>
             <label
               className="resizable-grid__control-row"
-              title="Material seed color used to derive cell background and boid HCT colors."
+              title="Material seed color used to derive boid HCT colors."
             >
               seed color
               <input
                 type="color"
                 value={themeSeedHex}
                 onChange={handleThemeSeedHexChange}
+              />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="Background color used for the pill cells."
+            >
+              pill bg color
+              <input
+                type="color"
+                value={pillBgHex}
+                onChange={handlePillBgHexChange}
               />
             </label>
             <label
@@ -896,20 +921,6 @@ export function ResizableGrid() {
             </div>
             <label
               className="resizable-grid__control-row"
-              title="Side length of each spatial-hash bucket (pixels). Smaller buckets mean more precise neighbor queries and more work per frame."
-            >
-              hash cell
-              <input
-                type="number"
-                min={1}
-                max={512}
-                step={1}
-                value={v02HashCellSize}
-                onChange={handleV02HashCellSizeChange}
-              />
-            </label>
-            <label
-              className="resizable-grid__control-row"
               title="Distance within which boids apply separation (avoid crowding)."
             >
               sep radius
@@ -1042,6 +1053,13 @@ export function ResizableGrid() {
             >
               min speed
               <input type="number" min={0} max={20} step={0.1} value={mouseMinSpeed} onChange={handleMouseMinSpeedChange} />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="Seconds for perturbation memory to fade from 1 to 0 (higher holds trails longer)."
+            >
+              decay rate
+              <input type="number" min={0.001} max={4} step={0.001} value={mouseDecayRate} onChange={handleMouseDecayRateChange} />
             </label>
           </div>
         </div>

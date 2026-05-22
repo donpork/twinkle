@@ -10,6 +10,12 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: 'PPNeueMachinaPlainRegular';
+  src: url('/PPNeueMachina-PlainRegular.otf') format('opentype');
+  font-display: swap;
+}
+
 /* ---------------------------------------------------------------------------
    Root — shared coordinate origin for all three layers.
    --------------------------------------------------------------------------- */
@@ -18,7 +24,7 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: rgb(14, 14, 22); /* visible in gaps and before first p5 frame */
+  background: #000000; /* visible in gaps and before first p5 frame */
   user-select: none;
 }
 
@@ -64,7 +70,7 @@
 }
 
 .resizable-grid__overlay-label--v02 {
-  font-family: 'SelfModernSemiBold', 'LarishAlteSemiBold', 'Kochi Mincho', 'Hiragino Mincho ProN', serif;
+  font-family: 'PPNeueMachinaPlainRegular', 'SelfModernSemiBold', 'LarishAlteSemiBold', 'Kochi Mincho', 'Hiragino Mincho ProN', serif;
 }
 
 .resizable-grid__version-tabs {
@@ -129,7 +135,7 @@
   height: 100%;
   border-radius: 50cqh;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.02);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -138,7 +144,7 @@
 }
 
 [data-cell-id='1-1'] .resizable-grid__cell-surface {
-  background: rgb(19, 3, 3);
+  background: transparent;
   border: none;
 }
 

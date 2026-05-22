@@ -21,7 +21,7 @@ const MOUSE_REPEL_GROWTH_PER_FRAME = 0.03
 const MOUSE_REPEL_CAP_MULTIPLIER = 3.2
 const MOUSE_REPEL_RADIUS_GROWTH_PER_FRAME = 1.4
 const MOUSE_REPEL_RADIUS_CAP_MULTIPLIER = 2.8
-const V01_COLOR_SMOOTH_ALPHA = 0.16
+const V01_COLOR_SMOOTH_ALPHA = 0.12
 const V02_FIXED_SPEED = MAX_SPEED_BASE * 0.96
 const MAX_NEIGHBORS_PER_BOID = 36
 const POINTER_CENTER_DEADZONE = 0.28
@@ -33,11 +33,16 @@ const BOID_CONSTANT_DIR_CHROMA_LIFT_MAX = 26
 const BOID_CONSTANT_SPEED_TONE_LIFT_MAX = 24
 const BOID_SEED_TONE = 5
 const BOID_PEAK_TONE = 75
+const PROXIMITY_LERP_UP = 0.06
+const PROXIMITY_LERP_DOWN = 0.24
+const PERTURBATION_BLEND_DISRUPTION = 0.72
+const PERTURBATION_BLEND_PROXIMITY = 0.28
 const SHOCKWAVE_MAX_RADIUS = 200
 const SHOCKWAVE_STRENGTH = 20
 const SHOCKWAVE_THICKNESS = 30
 const SHOCKWAVE_EXPAND_SPEED = 40
 const SHOCKWAVE_TWIST_RANGE = 0.4
+const HEADING_LERP = 0.18
 
 
 const V02_POST_VERT_SRC = /* glsl */ `
@@ -137,6 +142,9 @@ interface Boid {
   maxAge: number
   disruption: number
   proximityFraction: number
+  perturbationDecay: number
+  headingX: number
+  headingY: number
   sepStrength: number
   alignStrength: number
   cohesionStrength: number
@@ -201,6 +209,13 @@ function v02HashCell(x: number, y: number, hashCellSize: number): string {
   return `${Math.floor(x / hashCellSize)},${Math.floor(y / hashCellSize)}`
 }
 
+function v02QuarticFalloff(dist: number, radius: number): number {
+  const t = dist / radius
+  if (t >= 1.0) return 0
+  const u = 1 - t * t
+  return u * u
+}
+
 function v02RandomPointInPill(cx: number, cy: number, cw: number, ch: number): { x: number; y: number } {
   for (let i = 0; i < 24; i++) {
     const x = cx + Math.random() * cw
@@ -221,6 +236,8 @@ function v02MakeDirectionalBoid(x: number, y: number, dirX: number, dirY: number
     maxAge: Math.floor(lifeCycleFrames * (0.75 + Math.random() * 0.5)),
     disruption: 0,
     proximityFraction: 0,
+    perturbationDecay: 0,
+    headingX: rx, headingY: ry,
     sepStrength: 0, alignStrength: 0, cohesionStrength: 0,
     colorR: -1, colorG: -1, colorB: -1,
   }
@@ -288,7 +305,6 @@ function v02FlockAndFilter(
   mouseDownFrames: number,
   shockwaves: readonly Shockwave[],
   deathDistancePx: number,
-  hashCellSize: number,
   sepRadius: number,
   alignRadius: number,
   cohesionRadius: number,
@@ -303,12 +319,13 @@ function v02FlockAndFilter(
   mouseAttractWeight: number,
   mouseAccelSensitivity: number,
   mouseMinSpeed: number,
+  mouseDecayRate: number,
 ): Boid[] {
   const hasPointer = lx >= 0
-  const safeHashCellSize = Math.max(1, hashCellSize)
   const safeSepRadius = Math.max(1, sepRadius)
   const safeAlignRadius = Math.max(1, alignRadius)
   const safeCohesionRadius = Math.max(1, cohesionRadius)
+  const safeHashCellSize = Math.max(safeSepRadius, safeAlignRadius, safeCohesionRadius, mouseAlignRadius, mouseAttractRadius)
   const safeSepWeight = Math.max(0, sepWeight)
   const safeAlignWeight = Math.max(0, alignWeight)
   const safeCohesionWeight = Math.max(0, cohesionWeight)
@@ -434,8 +451,9 @@ function v02FlockAndFilter(
     }
 
     {
-      const raw = hasPointer ? Math.max(0, 1 - Math.hypot(b.x - lx, b.y - ly) / (mouseAttractRadius * 1.3)) ** 2 : 0
-      b.proximityFraction = v02Lerp(b.proximityFraction, raw, 0.08)
+      const raw = hasPointer ? v02QuarticFalloff(Math.hypot(b.x - lx, b.y - ly), mouseAttractRadius * 1.3) : 0
+      const proximityLerp = raw > b.proximityFraction ? PROXIMITY_LERP_UP : PROXIMITY_LERP_DOWN
+      b.proximityFraction = v02Lerp(b.proximityFraction, raw, proximityLerp)
     }
 
     // Pursuit — toward cursor, gated by mouse speed
@@ -444,7 +462,7 @@ function v02FlockAndFilter(
       const dy = ly - b.y
       const dist = Math.hypot(dx, dy)
       if (dist < mouseAttractRadius && dist > 0.1) {
-        const falloff = 1 - (dist / mouseAttractRadius) ** 2
+        const falloff = v02QuarticFalloff(dist, mouseAttractRadius)
         const speedGate = Math.min(mouseSpeed / 6, 1.0)
         const urgency = speedGate * (1 + accelMag * mouseAccelSensitivity)
         const [tx, ty] = v02SetMag(dx, dy, maxSpeed)
@@ -460,7 +478,7 @@ function v02FlockAndFilter(
       if (mouseSpeed > mouseMinSpeed) {
         const dist = Math.hypot(b.x - lx, b.y - ly)
         if (dist < mouseAlignRadius) {
-          const falloff = 1 - (dist / mouseAlignRadius) ** 2
+          const falloff = v02QuarticFalloff(dist, mouseAlignRadius)
           mouseDisruption = Math.max(mouseDisruption, falloff * 0.7)
           const [mvx, mvy] = v02SetMag(smVelX, smVelY, maxSpeed)
           const [fx, fy] = v02LimitMag(mvx - b.vx, mvy - b.vy, maxForce)
@@ -471,6 +489,12 @@ function v02FlockAndFilter(
     }
 
     b.disruption = v02Clamp01(mouseDisruption)
+    const rawPerturbation = v02Clamp01(
+      b.disruption * PERTURBATION_BLEND_DISRUPTION + b.proximityFraction * PERTURBATION_BLEND_PROXIMITY,
+    )
+    const safeDecaySeconds = Math.max(0.001, mouseDecayRate)
+    const decayPerFrame = 1 / (safeDecaySeconds * 60)
+    b.perturbationDecay = v02Clamp01(Math.max(rawPerturbation, b.perturbationDecay - decayPerFrame))
   }
 
   const alive: Boid[] = []
@@ -479,6 +503,11 @@ function v02FlockAndFilter(
     b.vy += b.ay
     ;[b.vx, b.vy] = v02LimitMag(b.vx, b.vy, maxSpeed)
     ;[b.vx, b.vy] = v02SetMag(b.vx, b.vy, V02_FIXED_SPEED * speedScale)
+    const spd = Math.hypot(b.vx, b.vy)
+    if (spd > 0.001) {
+      b.headingX = v02Lerp(b.headingX, b.vx / spd, HEADING_LERP)
+      b.headingY = v02Lerp(b.headingY, b.vy / spd, HEADING_LERP)
+    }
     b.x += b.vx
     b.y += b.vy
     b.age += 1
@@ -511,15 +540,16 @@ function v02DrawAllBoids(
   for (const b of boids) {
     const speed = Math.hypot(b.vx, b.vy)
     const lineLen = Math.max(1, speed * safeLineLength)
-    const ux = speed > 0.001 ? b.vx / speed : 1
-    const uy = speed > 0.001 ? b.vy / speed : 0
+    const ux = b.headingX
+    const uy = b.headingY
     const hx = ux * lineLen * 0.5
     const hy = uy * lineLen * 0.5
     const speed01 = v02Clamp01(speed / MAX_SPEED_BASE)
     const directionDot = v02Clamp01((ux * nx + uy * ny + 1) * 0.5) * 2 - 1
-    const perturbation = Math.max(b.disruption, b.proximityFraction)
+    const perturbation = b.perturbationDecay
+    const huePerturbation = Math.pow(perturbation, 1.8)
     const adjustedHue = lx >= 0
-      ? seedHct.hue + (Math.atan2(ly - b.y, lx - b.x) / Math.PI) * 18 * perturbation
+      ? seedHct.hue + (Math.atan2(ly - b.y, lx - b.x) / Math.PI) * 28 * huePerturbation
       : seedHct.hue
     const targetColor = constantSpeedMode
       ? (() => {
@@ -645,7 +675,6 @@ export function createBoidSketch(
         v02EdgeVelocityMultiplier,
         v02CenterSpeed,
         v02LifeCycleFrames,
-        v02HashCellSize,
         v02SepRadius,
         v02AlignRadius,
         v02CohesionRadius,
@@ -666,6 +695,7 @@ export function createBoidSketch(
         mouseAttractWeight,
         mouseAccelSensitivity,
         mouseMinSpeed,
+        mouseDecayRate,
       } = dataRef.current
 
       const VEL_LERP = 0.38
@@ -730,7 +760,6 @@ export function createBoidSketch(
         v02MouseDownFrames,
         shockwaves,
         deathDistancePx,
-        v02HashCellSize,
         v02SepRadius,
         v02AlignRadius,
         v02CohesionRadius,
@@ -745,6 +774,7 @@ export function createBoidSketch(
         mouseAttractWeight,
         mouseAccelSensitivity,
         mouseMinSpeed,
+        mouseDecayRate,
       )
 
       shockwaves = shockwaves

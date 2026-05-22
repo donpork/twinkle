@@ -1,7 +1,7 @@
 import p5 from 'p5'
 import type { MutableRefObject } from 'react'
 import type { SharedSceneData } from '../../types/grid'
-import { Hct, argbFromHex, blueFromArgb, greenFromArgb, redFromArgb } from '@material/material-color-utilities'
+import { argbFromHex, blueFromArgb, greenFromArgb, redFromArgb } from '@material/material-color-utilities'
 
 // ---------------------------------------------------------------------------
 // Shader sources
@@ -17,6 +17,8 @@ void main() {
 }
 `
 
+const PILL_EDGE_MARGIN_PX = 3
+
 const FRAG_SRC = /* glsl */ `
 precision mediump float;
 uniform vec2 uResolution;
@@ -26,9 +28,6 @@ uniform vec2 uLightPos;   // scene space; (-1, -1) when pointer is off-canvas
 uniform float uBlurPx;    // fast local blur radius in pixels
 
 vec4 shadePillAt(vec2 scenePos) {
-  // Cell-local UV: [0, 1] across cell width and height.
-  vec2 cellUV = (scenePos - uCellRect.xy) / uCellRect.zw;
-
   // Pill mask (capsule SDF) in cell-local pixels.
   vec2 localPos = scenePos - uCellRect.xy;
   vec2 halfSize = uCellRect.zw * 0.5;
@@ -41,11 +40,7 @@ vec4 shadePillAt(vec2 scenePos) {
   float mask = 1.0 - smoothstep(-1.2, 2.0, sdf);
   if (mask <= 0.0) return vec4(0.0);
 
-  // Subtle radial vignette.
-  float d = length(cellUV - 0.5) * 2.0;
-  float vignette = 1.0 - smoothstep(0.45, 1.1, d) * 0.42;
-
-  vec3 col = clamp(uColor * vignette, 0.0, 1.0);
+  vec3 col = clamp(uColor, 0.0, 1.0);
   return vec4(col, mask);
 }
 
@@ -92,16 +87,14 @@ export function createGridShaderSketch(
 
     p.draw = () => {
       p.ortho(-p.width * 0.5, p.width * 0.5, -p.height * 0.5, p.height * 0.5, -1000, 1000)
-      p.background(14, 14, 22)
+      p.background(0, 0, 0)
 
       if (!sh) return
       p.shader(sh)
       p.noStroke()
 
-      const { containerRects, lightPos, themeSeedHex } = dataRef.current
-      const seedArgb = argbFromHex(themeSeedHex)
-      const seedHct = Hct.fromInt(seedArgb)
-      const bgArgb = Hct.from(seedHct.hue, seedHct.chroma, 10).toInt()
+      const { containerRects, lightPos, pillBgHex } = dataRef.current
+      const bgArgb = argbFromHex(pillBgHex)
       const bgColor: [number, number, number] = [
         redFromArgb(bgArgb) / 255,
         greenFromArgb(bgArgb) / 255,
@@ -123,7 +116,7 @@ export function createGridShaderSketch(
           c.y + c.h * 0.5 - p.height * 0.5,
           0,
         )
-        p.plane(c.w, c.h)
+        p.plane(c.w + PILL_EDGE_MARGIN_PX * 2, c.h + PILL_EDGE_MARGIN_PX * 2)
         p.pop()
       }
     }

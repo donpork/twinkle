@@ -23,6 +23,7 @@ export interface SharedSceneData {
   containerRects: Map<string, CellRect>
   lightPos: { x: number; y: number }
   themeSeedHex: string
+  pillBgHex: string
   pointerOverSurface: boolean
   pointerDown: boolean
   mouseReleasedTick: number
@@ -40,7 +41,6 @@ export interface V02SceneData extends SharedSceneData {
   v02BoidLength: number
   v02BoidLineLength: number
   v02EdgeVelocityMultiplier: number
-  v02HashCellSize: number
   v02SepRadius: number
   v02AlignRadius: number
   v02CohesionRadius: number
@@ -65,5 +65,6 @@ export interface V02SceneData extends SharedSceneData {
   mouseAttractWeight: number
   mouseAccelSensitivity: number
   mouseMinSpeed: number
+  mouseDecayRate: number
 }
 
