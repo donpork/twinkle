@@ -67,5 +67,7 @@ export interface V02SceneData extends SharedSceneData {
   mouseMinSpeed: number
   /** Time in seconds for perturbation memory to fade from 1 → 0 (higher = slower fade, longer trail). */
   mouseDecayRate: number
+  /** Lerp factor used when proximityFraction is moving downward (higher clears proximity memory faster). */
+  mouseProximityLerpDown: number
 }
 

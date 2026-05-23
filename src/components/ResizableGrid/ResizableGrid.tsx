@@ -133,6 +133,7 @@ export function ResizableGrid() {
     mouseAccelSensitivity: 3.5,
     mouseMinSpeed: 0.3,
     mouseDecayRate: 1 / 90,
+    mouseProximityLerpDown: 0.4,
   })
 
   // ---- Mouse influence controls ----
@@ -143,6 +144,9 @@ export function ResizableGrid() {
   const [mouseAccelSensitivity, setMouseAccelSensitivity] = useState(3.5)
   const [mouseMinSpeed, setMouseMinSpeed] = useState(0.3)
   const [mouseDecayRate, setMouseDecayRate] = useState(1 / 90)
+  const [mouseProximityLerpDown, setMouseProximityLerpDown] = useState(0.4)
+  const [mouseDecayRateInput, setMouseDecayRateInput] = useState(String(1 / 90))
+  const [mouseProximityLerpDownInput, setMouseProximityLerpDownInput] = useState('0.4')
 
   // Active drag state (stored in ref to avoid re-renders during pointermove).
   const dragRef = useRef<DragState | null>(null)
@@ -561,8 +565,32 @@ export function ResizableGrid() {
     setMouseMinSpeed(v); v02DataRef.current.mouseMinSpeed = v
   }
   function handleMouseDecayRateChange(e: ChangeEvent<HTMLInputElement>) {
-    const v = Math.min(4, Math.max(0.001, Number(e.target.value)))
+    const raw = e.target.value
+    setMouseDecayRateInput(raw)
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) return
+    const v = Math.min(4, Math.max(0.001, parsed))
     setMouseDecayRate(v); v02DataRef.current.mouseDecayRate = v
+  }
+  function handleMouseProximityLerpDownChange(e: ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.value
+    setMouseProximityLerpDownInput(raw)
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) return
+    const v = Math.min(1, Math.max(0.001, parsed))
+    setMouseProximityLerpDown(v); v02DataRef.current.mouseProximityLerpDown = v
+  }
+  function handleMouseDecayRateBlur() {
+    const v = Math.min(4, Math.max(0.001, mouseDecayRate))
+    setMouseDecayRate(v)
+    v02DataRef.current.mouseDecayRate = v
+    setMouseDecayRateInput(String(v))
+  }
+  function handleMouseProximityLerpDownBlur() {
+    const v = Math.min(1, Math.max(0.001, mouseProximityLerpDown))
+    setMouseProximityLerpDown(v)
+    v02DataRef.current.mouseProximityLerpDown = v
+    setMouseProximityLerpDownInput(String(v))
   }
 
   function handleShowDebugChange(e: ChangeEvent<HTMLInputElement>) {
@@ -1059,7 +1087,30 @@ export function ResizableGrid() {
               title="Seconds for perturbation memory to fade from 1 to 0 (higher holds trails longer)."
             >
               decay time (s)
-              <input type="number" min={0.001} max={4} step={0.001} value={mouseDecayRate} onChange={handleMouseDecayRateChange} />
+              <input
+                type="number"
+                min={0.001}
+                max={4}
+                step={0.001}
+                value={mouseDecayRateInput}
+                onChange={handleMouseDecayRateChange}
+                onBlur={handleMouseDecayRateBlur}
+              />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="Lerp factor used when proximity memory is decreasing (higher clears proximity influence faster)."
+            >
+              proximity down lerp
+              <input
+                type="number"
+                min={0.001}
+                max={1}
+                step={0.001}
+                value={mouseProximityLerpDownInput}
+                onChange={handleMouseProximityLerpDownChange}
+                onBlur={handleMouseProximityLerpDownBlur}
+              />
             </label>
           </div>
         </div>

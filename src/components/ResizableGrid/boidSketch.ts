@@ -35,8 +35,6 @@ const BOID_CONSTANT_SPEED_TONE_LIFT_MAX = 24
 const BOID_SEED_TONE = 5
 const BOID_PEAK_TONE = 75
 const PROXIMITY_LERP_UP = 0.06
-// Down-smoothing must clear the perturbation floor faster than the slowest decay rate.
-const PROXIMITY_LERP_DOWN = 0.4
 const PERTURBATION_BLEND_DISRUPTION = 0.72
 const PERTURBATION_BLEND_PROXIMITY = 0.28
 const SHOCKWAVE_MAX_RADIUS = 200
@@ -322,6 +320,7 @@ function v02FlockAndFilter(
   mouseAccelSensitivity: number,
   mouseMinSpeed: number,
   mouseDecayRate: number,
+  mouseProximityLerpDown: number,
 ): Boid[] {
   const hasPointer = lx >= 0
   const safeSepRadius = Math.max(1, sepRadius)
@@ -331,6 +330,7 @@ function v02FlockAndFilter(
   const safeSepWeight = Math.max(0, sepWeight)
   const safeAlignWeight = Math.max(0, alignWeight)
   const safeCohesionWeight = Math.max(0, cohesionWeight)
+  const safeProximityLerpDown = Math.min(1, Math.max(0.001, mouseProximityLerpDown))
   const maxSpeed = Math.max(0.02, MAX_SPEED_BASE * speedScale)
   const maxForce = MAX_FORCE_BASE * (0.22 + 0.78 * speedScale)
   const n = boids.length
@@ -454,7 +454,7 @@ function v02FlockAndFilter(
 
     {
       const raw = hasPointer ? v02QuarticFalloff(Math.hypot(b.x - lx, b.y - ly), mouseAttractRadius * 1.3) : 0
-      const proximityLerp = raw > b.proximityFraction ? PROXIMITY_LERP_UP : PROXIMITY_LERP_DOWN
+      const proximityLerp = raw > b.proximityFraction ? PROXIMITY_LERP_UP : safeProximityLerpDown
       b.proximityFraction = v02Lerp(b.proximityFraction, raw, proximityLerp)
     }
 
@@ -701,6 +701,7 @@ export function createBoidSketch(
         mouseAccelSensitivity,
         mouseMinSpeed,
         mouseDecayRate,
+        mouseProximityLerpDown,
       } = dataRef.current
 
       const VEL_LERP = 0.38
@@ -780,6 +781,7 @@ export function createBoidSketch(
         mouseAccelSensitivity,
         mouseMinSpeed,
         mouseDecayRate,
+        mouseProximityLerpDown,
       )
 
       shockwaves = shockwaves
