@@ -1058,7 +1058,7 @@ export function ResizableGrid() {
               className="resizable-grid__control-row"
               title="Seconds for perturbation memory to fade from 1 to 0 (higher holds trails longer)."
             >
-              decay rate
+              decay time (s)
               <input type="number" min={0.001} max={4} step={0.001} value={mouseDecayRate} onChange={handleMouseDecayRateChange} />
             </label>
           </div>

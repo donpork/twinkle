@@ -22,6 +22,7 @@ const MOUSE_REPEL_CAP_MULTIPLIER = 3.2
 const MOUSE_REPEL_RADIUS_GROWTH_PER_FRAME = 1.4
 const MOUSE_REPEL_RADIUS_CAP_MULTIPLIER = 2.8
 const V01_COLOR_SMOOTH_ALPHA = 0.12
+const V01_COLOR_SMOOTH_ALPHA_DECAY = 0.28
 const V02_FIXED_SPEED = MAX_SPEED_BASE * 0.96
 const MAX_NEIGHBORS_PER_BOID = 36
 const POINTER_CENTER_DEADZONE = 0.28
@@ -34,7 +35,8 @@ const BOID_CONSTANT_SPEED_TONE_LIFT_MAX = 24
 const BOID_SEED_TONE = 5
 const BOID_PEAK_TONE = 75
 const PROXIMITY_LERP_UP = 0.06
-const PROXIMITY_LERP_DOWN = 0.24
+// Down-smoothing must clear the perturbation floor faster than the slowest decay rate.
+const PROXIMITY_LERP_DOWN = 0.4
 const PERTURBATION_BLEND_DISRUPTION = 0.72
 const PERTURBATION_BLEND_PROXIMITY = 0.28
 const SHOCKWAVE_MAX_RADIUS = 200
@@ -572,7 +574,7 @@ function v02DrawAllBoids(
       : (() => {
           const chromaShiftRaw = (speed01 - 0.5) * (BOID_CHROMA_SHIFT_MAX * 2) + (b.alignStrength - b.sepStrength) * 8
           const chromaShift = Math.max(-BOID_CHROMA_SHIFT_MAX, Math.min(BOID_CHROMA_SHIFT_MAX, chromaShiftRaw))
-          const toneShiftRaw = (speed01 - 0.5) * (BOID_TONE_SHIFT_MAX * 2) + b.cohesionStrength * 4
+          const toneShiftRaw = (speed01 - 0.5) * (BOID_TONE_SHIFT_MAX * 2) + b.cohesionStrength * 4 * b.perturbationDecay
           const toneShiftBase = Math.max(-BOID_TONE_SHIFT_MAX, Math.min(BOID_TONE_SHIFT_MAX, toneShiftRaw))
           const toneShift = toneShiftBase + perturbation * BOID_DISRUPTION_TONE_BOOST_MAX
           const tone = Math.min(BOID_PEAK_TONE, BOID_SEED_TONE + toneShift)
@@ -588,9 +590,12 @@ function v02DrawAllBoids(
       b.colorG = targetColor[1]
       b.colorB = targetColor[2]
     } else {
-      b.colorR = v02Lerp(b.colorR, targetColor[0], V01_COLOR_SMOOTH_ALPHA)
-      b.colorG = v02Lerp(b.colorG, targetColor[1], V01_COLOR_SMOOTH_ALPHA)
-      b.colorB = v02Lerp(b.colorB, targetColor[2], V01_COLOR_SMOOTH_ALPHA)
+      const targetLuma = 0.299 * targetColor[0] + 0.587 * targetColor[1] + 0.114 * targetColor[2]
+      const currentLuma = 0.299 * b.colorR + 0.587 * b.colorG + 0.114 * b.colorB
+      const colorAlpha = targetLuma < currentLuma ? V01_COLOR_SMOOTH_ALPHA_DECAY : V01_COLOR_SMOOTH_ALPHA
+      b.colorR = v02Lerp(b.colorR, targetColor[0], colorAlpha)
+      b.colorG = v02Lerp(b.colorG, targetColor[1], colorAlpha)
+      b.colorB = v02Lerp(b.colorB, targetColor[2], colorAlpha)
     }
     const color: [number, number, number] = [
       Math.round(b.colorR),

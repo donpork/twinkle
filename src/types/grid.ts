@@ -65,6 +65,7 @@ export interface V02SceneData extends SharedSceneData {
   mouseAttractWeight: number
   mouseAccelSensitivity: number
   mouseMinSpeed: number
+  /** Time in seconds for perturbation memory to fade from 1 → 0 (higher = slower fade, longer trail). */
   mouseDecayRate: number
 }
 
