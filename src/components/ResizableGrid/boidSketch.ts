@@ -1,6 +1,6 @@
 import p5 from 'p5'
 import type { MutableRefObject } from 'react'
-import type { V02SceneData } from '../../types/grid'
+import type { V02MovementMode, V02SceneData } from '../../types/grid'
 import { Hct, argbFromHex, blueFromArgb, greenFromArgb, redFromArgb } from '@material/material-color-utilities'
 
 // ---------------------------------------------------------------------------
@@ -16,6 +16,7 @@ const MAX_SPEED_BASE = 2.8
 const MAX_FORCE_BASE = 0.075
 const ORBIT_CLOCKWISE = true
 const ORBIT_WEIGHT = 0.65
+const FLOW_WEIGHT = 0.4
 const INNER_REPEL_FORCE = 1.25
 const WALL_REPEL_RANGE = 28
 const WALL_REPEL_FORCE = 3.4
@@ -262,6 +263,15 @@ function v02RandomPointInAnnulus(
   return { x: cx + cw * 0.5, y: cy + bandMid }
 }
 
+function v02RandomPointInPill(cx: number, cy: number, cw: number, ch: number): { x: number; y: number } {
+  for (let i = 0; i < 24; i++) {
+    const x = cx + Math.random() * cw
+    const y = cy + Math.random() * ch
+    if (v02PillSDF(x, y, cx, cy, cw, ch) <= 0) return { x, y }
+  }
+  return { x: cx + cw * 0.5, y: cy + ch * 0.5 }
+}
+
 function v02MakeDirectionalBoid(
   x: number, y: number,
   dirX: number, dirY: number,
@@ -292,17 +302,25 @@ function v02HctToRgb(hue: number, chroma: number, tone: number): [number, number
 function v02InitBoids(
   cx: number, cy: number, cw: number, ch: number,
   lifeCycleFrames: number,
+  movementMode: V02MovementMode,
   innerExclusionDepth: number,
   spawnOuterMarginPx: number,
+  dirX: number,
+  dirY: number,
 ): Boid[] {
   const boids: Boid[] = []
   for (let i = 0; i < INITIAL_BOIDS; i++) {
-    const pt = v02RandomPointInAnnulus(cx, cy, cw, ch, innerExclusionDepth, spawnOuterMarginPx)
-    const [gx, gy] = v02PillGradient(pt.x, pt.y, cx, cy, cw, ch)
-    const orbitSign = ORBIT_CLOCKWISE ? 1 : -1
-    const tangentX = -gy * orbitSign
-    const tangentY = gx * orbitSign
-    boids.push(v02MakeDirectionalBoid(pt.x, pt.y, tangentX, tangentY, lifeCycleFrames))
+    if (movementMode === 'isocontour') {
+      const pt = v02RandomPointInAnnulus(cx, cy, cw, ch, innerExclusionDepth, spawnOuterMarginPx)
+      const [gx, gy] = v02PillGradient(pt.x, pt.y, cx, cy, cw, ch)
+      const orbitSign = ORBIT_CLOCKWISE ? 1 : -1
+      const tangentX = -gy * orbitSign
+      const tangentY = gx * orbitSign
+      boids.push(v02MakeDirectionalBoid(pt.x, pt.y, tangentX, tangentY, lifeCycleFrames))
+    } else {
+      const pt = v02RandomPointInPill(cx, cy, cw, ch)
+      boids.push(v02MakeDirectionalBoid(pt.x, pt.y, dirX, dirY, lifeCycleFrames))
+    }
   }
   return boids
 }
@@ -348,6 +366,8 @@ function v02BuildSpatialHash(boids: Boid[], hashCellSize: number): Map<string, n
 function v02FlockAndFilter(
   boids: Boid[],
   cx: number, cy: number, cw: number, ch: number,
+  movementMode: V02MovementMode,
+  dirX: number, dirY: number,
   innerExclusionDepth: number,
   speedScale: number,
   lx: number, ly: number,
@@ -388,6 +408,7 @@ function v02FlockAndFilter(
   const alignR2 = safeAlignRadius * safeAlignRadius
   const cohesionR2 = safeCohesionRadius * safeCohesionRadius
   const buckets = v02BuildSpatialHash(boids, safeHashCellSize)
+  const [flowVX, flowVY] = v02SetMag(dirX, dirY, maxSpeed)
   const mouseRepelScale = Math.min(
     1 + mouseDownFrames * MOUSE_REPEL_GROWTH_PER_FRAME,
     MOUSE_REPEL_CAP_MULTIPLIER,
@@ -465,34 +486,40 @@ function v02FlockAndFilter(
     b.alignStrength = v02Clamp01(algnCnt / 7)
     b.cohesionStrength = v02Clamp01(coheCnt / 7)
 
-    const sdf = v02PillSDF(b.x, b.y, cx, cy, cw, ch)
-    const [gx, gy] = v02PillGradient(b.x, b.y, cx, cy, cw, ch)
-    const orbitSign = ORBIT_CLOCKWISE ? 1 : -1
-    {
-      const tangentX = -gy * orbitSign
-      const tangentY = gx * orbitSign
-      const [tvx, tvy] = v02SetMag(tangentX, tangentY, maxSpeed)
-      const [fx, fy] = v02LimitMag(tvx - b.vx, tvy - b.vy, maxForce)
-      b.ax += fx * ORBIT_WEIGHT
-      b.ay += fy * ORBIT_WEIGHT
-    }
-    {
-      const innerThreshold = -innerExclusionDepth
-      if (sdf < innerThreshold) {
-        const excess = (innerThreshold - sdf) / Math.max(Math.abs(innerThreshold), 1)
-        const strength = excess * excess * INNER_REPEL_FORCE
-        b.ax += gx * strength
-        b.ay += gy * strength
+    if (movementMode === 'isocontour') {
+      const sdf = v02PillSDF(b.x, b.y, cx, cy, cw, ch)
+      const [gx, gy] = v02PillGradient(b.x, b.y, cx, cy, cw, ch)
+      const orbitSign = ORBIT_CLOCKWISE ? 1 : -1
+      {
+        const tangentX = -gy * orbitSign
+        const tangentY = gx * orbitSign
+        const [tvx, tvy] = v02SetMag(tangentX, tangentY, maxSpeed)
+        const [fx, fy] = v02LimitMag(tvx - b.vx, tvy - b.vy, maxForce)
+        b.ax += fx * ORBIT_WEIGHT
+        b.ay += fy * ORBIT_WEIGHT
       }
-    }
-    {
-      const distToWall = -sdf
-      if (distToWall >= 0 && distToWall < WALL_REPEL_RANGE) {
-        const t = distToWall / WALL_REPEL_RANGE
-        const repelStrength = Math.exp(-t * WALL_REPEL_EXPONENT) * WALL_REPEL_FORCE
-        b.ax -= gx * repelStrength
-        b.ay -= gy * repelStrength
+      {
+        const innerThreshold = -innerExclusionDepth
+        if (sdf < innerThreshold) {
+          const excess = (innerThreshold - sdf) / Math.max(Math.abs(innerThreshold), 1)
+          const strength = excess * excess * INNER_REPEL_FORCE
+          b.ax += gx * strength
+          b.ay += gy * strength
+        }
       }
+      {
+        const distToWall = -sdf
+        if (distToWall >= 0 && distToWall < WALL_REPEL_RANGE) {
+          const t = distToWall / WALL_REPEL_RANGE
+          const repelStrength = Math.exp(-t * WALL_REPEL_EXPONENT) * WALL_REPEL_FORCE
+          b.ax -= gx * repelStrength
+          b.ay -= gy * repelStrength
+        }
+      }
+    } else {
+      const [fx, fy] = v02LimitMag(flowVX - b.vx, flowVY - b.vy, maxForce)
+      b.ax += fx * FLOW_WEIGHT
+      b.ay += fy * FLOW_WEIGHT
     }
 
     for (const sw of shockwaves) {
@@ -599,12 +626,14 @@ function v02DrawAllBoids(
   v02BoidLength: number,
   v02BoidLineLength: number,
   themeSeedHex: string,
+  movementMode: V02MovementMode,
   flowDirX: number,
   flowDirY: number,
   constantSpeedMode: boolean,
   targetSpeed: number,
   lx: number,
   ly: number,
+  mouseColorActive: boolean,
 ) {
   g.strokeWeight(Math.max(1, v02BoidLength))
   g.noFill()
@@ -622,11 +651,18 @@ function v02DrawAllBoids(
     const speed01 = v02Clamp01(speed / MAX_SPEED_BASE)
     const directionDot = v02Clamp01((ux * nx + uy * ny + 1) * 0.5) * 2 - 1
     const perturbation = b.perturbationDecay
-    const huePerturbation = Math.pow(perturbation, 1.8)
+    const colorPerturbation = movementMode === 'isocontour' && !mouseColorActive ? 0 : perturbation
+    const huePerturbation = Math.pow(colorPerturbation, 1.8)
     const adjustedHue = lx >= 0
       ? seedHct.hue + (Math.atan2(ly - b.y, lx - b.x) / Math.PI) * 28 * huePerturbation
       : seedHct.hue
-    const targetColor = constantSpeedMode
+    const targetColor = movementMode === 'isocontour'
+      ? (() => {
+          const tone = Math.min(BOID_PEAK_TONE, BOID_SEED_TONE + colorPerturbation * BOID_DISRUPTION_TONE_BOOST_MAX)
+          const chroma = seedHct.chroma + colorPerturbation * BOID_CONSTANT_DIR_CHROMA_LIFT_MAX
+          return v02HctToRgb(adjustedHue, chroma, tone)
+        })()
+      : constantSpeedMode
       ? (() => {
           const angleDelta01 = v02Clamp01((1 - directionDot) * 0.5)
           const speedDelta01 = targetSpeed > 0.001
@@ -689,8 +725,11 @@ function v02SpawnUpToMinimum(
   minLiveBoids: number,
   cx: number, cy: number, cw: number, ch: number,
   lifeCycleFrames: number,
+  movementMode: V02MovementMode,
   innerExclusionDepth: number,
   spawnOuterMarginPx: number,
+  dirX: number,
+  dirY: number,
 ) {
   const target = Math.min(Math.max(0, Math.floor(minLiveBoids)), MAX_BOIDS_HARD)
   if (boids.length > target) {
@@ -700,12 +739,17 @@ function v02SpawnUpToMinimum(
   if (boids.length >= target) return
   const toAdd = Math.min(SPAWN_BATCH_PER_FRAME, target - boids.length)
   for (let i = 0; i < toAdd; i++) {
-    const pt = v02RandomPointInAnnulus(cx, cy, cw, ch, innerExclusionDepth, spawnOuterMarginPx)
-    const [gx, gy] = v02PillGradient(pt.x, pt.y, cx, cy, cw, ch)
-    const orbitSign = ORBIT_CLOCKWISE ? 1 : -1
-    const tangentX = -gy * orbitSign
-    const tangentY = gx * orbitSign
-    boids.push(v02MakeDirectionalBoid(pt.x, pt.y, tangentX, tangentY, lifeCycleFrames))
+    if (movementMode === 'isocontour') {
+      const pt = v02RandomPointInAnnulus(cx, cy, cw, ch, innerExclusionDepth, spawnOuterMarginPx)
+      const [gx, gy] = v02PillGradient(pt.x, pt.y, cx, cy, cw, ch)
+      const orbitSign = ORBIT_CLOCKWISE ? 1 : -1
+      const tangentX = -gy * orbitSign
+      const tangentY = gx * orbitSign
+      boids.push(v02MakeDirectionalBoid(pt.x, pt.y, tangentX, tangentY, lifeCycleFrames))
+    } else {
+      const pt = v02RandomPointInPill(cx, cy, cw, ch)
+      boids.push(v02MakeDirectionalBoid(pt.x, pt.y, dirX, dirY, lifeCycleFrames))
+    }
   }
 }
 
@@ -755,6 +799,7 @@ export function createBoidSketch(
         minLiveBoids,
         v02BoidLength,
         v02BoidLineLength,
+        v02MovementMode,
         v02EdgeVelocityMultiplier,
         v02InnerExclusionDepth,
         v02SpawnOuterMarginPx,
@@ -823,8 +868,11 @@ export function createBoidSketch(
           cell11.w,
           cell11.h,
           v02LifeCycleFrames,
+          v02MovementMode,
           innerExclusionDepth,
           spawnOuterMarginPx,
+          activeDirX,
+          activeDirY,
         )
         v02Initialized = true
       }
@@ -843,13 +891,18 @@ export function createBoidSketch(
         minLiveBoids,
         cell11.x, cell11.y, cell11.w, cell11.h,
         v02LifeCycleFrames,
+        v02MovementMode,
         innerExclusionDepth,
         spawnOuterMarginPx,
+        activeDirX,
+        activeDirY,
       )
 
       v02Boids = v02FlockAndFilter(
         v02Boids,
         cell11.x, cell11.y, cell11.w, cell11.h,
+        v02MovementMode,
+        activeDirX, activeDirY,
         innerExclusionDepth,
         v02SpeedScale,
         lightPos.x, lightPos.y,
@@ -880,18 +933,21 @@ export function createBoidSketch(
         .filter(sw => sw.radius < sw.maxRadius)
 
       boidBuffer.clear()
+      const mouseColorActive = mouseSpeed > mouseMinSpeed || pointerDown || shockwaves.length > 0
       v02DrawAllBoids(
         boidBuffer,
         v02Boids,
         v02BoidLength,
         v02BoidLineLength,
         themeSeedHex,
+        v02MovementMode,
         activeDirX,
         activeDirY,
         v02ConstantSpeedAtCenter,
         V02_FIXED_SPEED * v02SpeedScale,
         lightPos.x,
         lightPos.y,
+        mouseColorActive,
       )
 
       p.clear()

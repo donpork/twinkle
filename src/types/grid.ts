@@ -1,5 +1,6 @@
 export type CellType = 'normal' | 'super' | 'micro' | 'empty'
 export type CellVersion = 'v02'
+export type V02MovementMode = 'isocontour' | 'legacy_flow'
 
 export interface LayoutCellDef {
   id: string
@@ -40,6 +41,7 @@ export interface V02SceneData extends SharedSceneData {
   boidBlurPx: number
   v02BoidLength: number
   v02BoidLineLength: number
+  v02MovementMode: V02MovementMode
   v02EdgeVelocityMultiplier: number
   /** Distance from wall into the pill where center exclusion begins (px). */
   v02InnerExclusionDepth: number

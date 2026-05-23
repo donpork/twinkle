@@ -1,7 +1,7 @@
 import { useRef, useState, useLayoutEffect, useEffect, useCallback } from 'react'
 import type { MutableRefObject, PointerEvent as RPointerEvent, ChangeEvent } from 'react'
 import { applyAxisPixelDelta, renormalizeToSum, enforceTrackBounds } from './trackMath'
-import type { CellRect, LayoutCellDef, SharedSceneData, V02SceneData } from '../../types/grid'
+import type { CellRect, LayoutCellDef, SharedSceneData, V02MovementMode, V02SceneData } from '../../types/grid'
 import { ShaderCanvas } from './ShaderCanvas'
 import { BoidCanvas } from './BoidCanvas'
 import { Hct, argbFromHex, blueFromArgb, greenFromArgb, redFromArgb } from '@material/material-color-utilities'
@@ -74,9 +74,10 @@ export function ResizableGrid() {
   const [v02MinLiveBoids, setV02MinLiveBoids] = useState(2000)
   const [v02BoidLength, setV02BoidLength] = useState(2)
   const [v02BoidLineLength, setV02BoidLineLength] = useState(6)
+  const [v02MovementMode, setV02MovementMode] = useState<V02MovementMode>('isocontour')
   const [v02EdgeVelocityMultiplier, setV02EdgeVelocityMultiplier] = useState(0)
-  const [v02InnerExclusionDepth, setV02InnerExclusionDepth] = useState(18)
-  const [v02SpawnOuterMarginPx, setV02SpawnOuterMarginPx] = useState(28)
+  const [v02InnerExclusionDepth, setV02InnerExclusionDepth] = useState(200)
+  const [v02SpawnOuterMarginPx, setV02SpawnOuterMarginPx] = useState(2)
   const [v02SepRadius, setV02SepRadius] = useState(80)
   const [v02AlignRadius, setV02AlignRadius] = useState(44)
   const [v02CohesionRadius, setV02CohesionRadius] = useState(60)
@@ -85,7 +86,7 @@ export function ResizableGrid() {
   const [v02CohesionWeight, setV02CohesionWeight] = useState(0.8)
   const [v02CenterSpeed, setV02CenterSpeed] = useState(0.3)
   const [v02LifeCycleFrames, setV02LifeCycleFrames] = useState(400)
-  const [v02FlowFollowsPointer, setV02FlowFollowsPointer] = useState(false)
+  const [v02FlowFollowsPointer, setV02FlowFollowsPointer] = useState(true)
   const [v02ConstantSpeedAtCenter, setV02ConstantSpeedAtCenter] = useState(true)
   const [v02ConstantDirectionDeg, setV02ConstantDirectionDeg] = useState(135)
 
@@ -114,9 +115,10 @@ export function ResizableGrid() {
     boidBlurPx: 4,
     v02BoidLength: 2,
     v02BoidLineLength: 6,
+    v02MovementMode: 'isocontour',
     v02EdgeVelocityMultiplier: 0,
-    v02InnerExclusionDepth: 18,
-    v02SpawnOuterMarginPx: 28,
+    v02InnerExclusionDepth: 200,
+    v02SpawnOuterMarginPx: 2,
     v02SepRadius: 80,
     v02AlignRadius: 44,
     v02CohesionRadius: 60,
@@ -125,7 +127,7 @@ export function ResizableGrid() {
     v02CohesionWeight: 0.8,
     v02CenterSpeed: 0.3,
     v02LifeCycleFrames: 400,
-    v02FlowFollowsPointer: false,
+    v02FlowFollowsPointer: true,
     v02ConstantSpeedAtCenter: true,
     v02ConstantDirectionDeg: 135,
     mouseRawVelX: 0,
@@ -136,8 +138,8 @@ export function ResizableGrid() {
     mouseAttractWeight: 5,
     mouseAccelSensitivity: 3.5,
     mouseMinSpeed: 0.3,
-    mouseDecayRate: 1 / 90,
-    mouseProximityLerpDown: 0.4,
+    mouseDecayRate: 0.1,
+    mouseProximityLerpDown: 0.08,
   })
 
   // ---- Mouse influence controls ----
@@ -147,10 +149,10 @@ export function ResizableGrid() {
   const [mouseAttractWeight, setMouseAttractWeight] = useState(5)
   const [mouseAccelSensitivity, setMouseAccelSensitivity] = useState(3.5)
   const [mouseMinSpeed, setMouseMinSpeed] = useState(0.3)
-  const [mouseDecayRate, setMouseDecayRate] = useState(1 / 90)
-  const [mouseProximityLerpDown, setMouseProximityLerpDown] = useState(0.4)
-  const [mouseDecayRateInput, setMouseDecayRateInput] = useState(String(1 / 90))
-  const [mouseProximityLerpDownInput, setMouseProximityLerpDownInput] = useState('0.4')
+  const [mouseDecayRate, setMouseDecayRate] = useState(0.1)
+  const [mouseProximityLerpDown, setMouseProximityLerpDown] = useState(0.08)
+  const [mouseDecayRateInput, setMouseDecayRateInput] = useState('0.1')
+  const [mouseProximityLerpDownInput, setMouseProximityLerpDownInput] = useState('0.08')
 
   // Active drag state (stored in ref to avoid re-renders during pointermove).
   const dragRef = useRef<DragState | null>(null)
@@ -410,7 +412,10 @@ export function ResizableGrid() {
     }
     prevLightPosRef.current = { x: lightPos.x, y: lightPos.y }
 
-    if (v02DataRef.current.v02FlowFollowsPointer) {
+    if (
+      v02DataRef.current.v02MovementMode === 'legacy_flow'
+      && v02DataRef.current.v02FlowFollowsPointer
+    ) {
       const target = v02DataRef.current.containerRects.get('1-1')
       if (target) {
         const cx = target.x + target.w * 0.5
@@ -469,6 +474,12 @@ export function ResizableGrid() {
     const v = Math.max(1, Number(e.target.value))
     setV02BoidLineLength(v)
     v02DataRef.current.v02BoidLineLength = v
+  }
+
+  function handleV02MovementModeChange(e: ChangeEvent<HTMLSelectElement>) {
+    const v = e.target.value as V02MovementMode
+    setV02MovementMode(v)
+    v02DataRef.current.v02MovementMode = v
   }
 
   function handleV02EdgeVelocityMultiplierChange(e: ChangeEvent<HTMLInputElement>) {
@@ -806,6 +817,16 @@ export function ResizableGrid() {
             </label>
             <label
               className="resizable-grid__control-row"
+              title="Selects the at-rest movement architecture for boid steering."
+            >
+              movement mode
+              <select value={v02MovementMode} onChange={handleV02MovementModeChange}>
+                <option value="isocontour">isocontour advection</option>
+                <option value="legacy_flow">legacy flow</option>
+              </select>
+            </label>
+            <label
+              className="resizable-grid__control-row"
               title="Material seed color used to derive boid HCT colors."
             >
               seed color
@@ -846,17 +867,19 @@ export function ResizableGrid() {
             >
               Boids
             </div>
-            <label
-              className="resizable-grid__control-row resizable-grid__control-row--checkbox"
-              title="When on, the global flow direction and newly spawned boids follow the vector from the focus cell center toward the cursor. When off, that direction stays at its last value until you turn this back on."
-            >
-              flow follows pointer
-              <input
-                type="checkbox"
-                checked={v02FlowFollowsPointer}
-                onChange={handleV02FlowFollowsPointerChange}
-              />
-            </label>
+            {v02MovementMode === 'legacy_flow' ? (
+              <label
+                className="resizable-grid__control-row resizable-grid__control-row--checkbox"
+                title="When on, legacy flow direction and legacy spawns follow the vector from focus-cell center toward cursor."
+              >
+                flow follows pointer
+                <input
+                  type="checkbox"
+                  checked={v02FlowFollowsPointer}
+                  onChange={handleV02FlowFollowsPointerChange}
+                />
+              </label>
+            ) : null}
             <label
               className="resizable-grid__control-row resizable-grid__control-row--checkbox"
               title="When on, boid speed stays fixed to the center speed value and ignores cursor-distance speed scaling."
@@ -868,7 +891,7 @@ export function ResizableGrid() {
                 onChange={handleV02ConstantSpeedAtCenterChange}
               />
             </label>
-            {v02ConstantSpeedAtCenter ? (
+            {v02MovementMode === 'legacy_flow' && v02ConstantSpeedAtCenter ? (
               <label
                 className="resizable-grid__control-row"
                 title="Heading for boids in constant speed mode. 0° points up from the center and values rotate clockwise."
@@ -898,34 +921,38 @@ export function ResizableGrid() {
                 onChange={handleV02EdgeVelocityMultiplierChange}
               />
             </label>
-            <label
-              className="resizable-grid__control-row"
-              title="Depth of the center exclusion zone measured inward from the pill wall (px)."
-            >
-              inner exclusion depth
-              <input
-                type="number"
-                min={1}
-                max={300}
-                step={1}
-                value={v02InnerExclusionDepth}
-                onChange={handleV02InnerExclusionDepthChange}
-              />
-            </label>
-            <label
-              className="resizable-grid__control-row"
-              title="Spawn margin from the pill wall (px); setting this near wall repel range avoids wall-edge births."
-            >
-              outer margin
-              <input
-                type="number"
-                min={1}
-                max={300}
-                step={1}
-                value={v02SpawnOuterMarginPx}
-                onChange={handleV02SpawnOuterMarginPxChange}
-              />
-            </label>
+            {v02MovementMode === 'isocontour' ? (
+              <label
+                className="resizable-grid__control-row"
+                title="Depth of the center exclusion zone measured inward from the pill wall (px)."
+              >
+                inner exclusion depth
+                <input
+                  type="number"
+                  min={1}
+                  max={300}
+                  step={1}
+                  value={v02InnerExclusionDepth}
+                  onChange={handleV02InnerExclusionDepthChange}
+                />
+              </label>
+            ) : null}
+            {v02MovementMode === 'isocontour' ? (
+              <label
+                className="resizable-grid__control-row"
+                title="Spawn margin from the pill wall (px); setting this near wall repel range avoids wall-edge births."
+              >
+                outer margin
+                <input
+                  type="number"
+                  min={1}
+                  max={300}
+                  step={1}
+                  value={v02SpawnOuterMarginPx}
+                  onChange={handleV02SpawnOuterMarginPxChange}
+                />
+              </label>
+            ) : null}
             <label
               className="resizable-grid__control-row"
               title="Minimum speed scale when the cursor sits near the cell center; blends with edge speed toward the rim."
