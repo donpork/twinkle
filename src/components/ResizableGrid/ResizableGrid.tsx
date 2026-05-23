@@ -75,6 +75,8 @@ export function ResizableGrid() {
   const [v02BoidLength, setV02BoidLength] = useState(2)
   const [v02BoidLineLength, setV02BoidLineLength] = useState(6)
   const [v02EdgeVelocityMultiplier, setV02EdgeVelocityMultiplier] = useState(0)
+  const [v02InnerExclusionDepth, setV02InnerExclusionDepth] = useState(18)
+  const [v02SpawnOuterMarginPx, setV02SpawnOuterMarginPx] = useState(28)
   const [v02SepRadius, setV02SepRadius] = useState(80)
   const [v02AlignRadius, setV02AlignRadius] = useState(44)
   const [v02CohesionRadius, setV02CohesionRadius] = useState(60)
@@ -113,6 +115,8 @@ export function ResizableGrid() {
     v02BoidLength: 2,
     v02BoidLineLength: 6,
     v02EdgeVelocityMultiplier: 0,
+    v02InnerExclusionDepth: 18,
+    v02SpawnOuterMarginPx: 28,
     v02SepRadius: 80,
     v02AlignRadius: 44,
     v02CohesionRadius: 60,
@@ -471,6 +475,18 @@ export function ResizableGrid() {
     const v = Math.max(0, Number(e.target.value))
     setV02EdgeVelocityMultiplier(v)
     v02DataRef.current.v02EdgeVelocityMultiplier = v
+  }
+
+  function handleV02InnerExclusionDepthChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(1, Number(e.target.value))
+    setV02InnerExclusionDepth(v)
+    v02DataRef.current.v02InnerExclusionDepth = v
+  }
+
+  function handleV02SpawnOuterMarginPxChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(1, Number(e.target.value))
+    setV02SpawnOuterMarginPx(v)
+    v02DataRef.current.v02SpawnOuterMarginPx = v
   }
 
   function handleV02SepRadiusChange(e: ChangeEvent<HTMLInputElement>) {
@@ -880,6 +896,34 @@ export function ResizableGrid() {
                 step={0.05}
                 value={v02EdgeVelocityMultiplier}
                 onChange={handleV02EdgeVelocityMultiplierChange}
+              />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="Depth of the center exclusion zone measured inward from the pill wall (px)."
+            >
+              inner exclusion depth
+              <input
+                type="number"
+                min={1}
+                max={300}
+                step={1}
+                value={v02InnerExclusionDepth}
+                onChange={handleV02InnerExclusionDepthChange}
+              />
+            </label>
+            <label
+              className="resizable-grid__control-row"
+              title="Spawn margin from the pill wall (px); setting this near wall repel range avoids wall-edge births."
+            >
+              outer margin
+              <input
+                type="number"
+                min={1}
+                max={300}
+                step={1}
+                value={v02SpawnOuterMarginPx}
+                onChange={handleV02SpawnOuterMarginPxChange}
               />
             </label>
             <label

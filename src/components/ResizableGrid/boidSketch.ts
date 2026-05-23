@@ -14,7 +14,12 @@ const SPAWN_JITTER_ANGLE = 0.45
 const SPAWN_SPEED_BASE = 1.25
 const MAX_SPEED_BASE = 2.8
 const MAX_FORCE_BASE = 0.075
-const FLOW_WEIGHT = 0.4
+const ORBIT_CLOCKWISE = true
+const ORBIT_WEIGHT = 0.65
+const INNER_REPEL_FORCE = 1.25
+const WALL_REPEL_RANGE = 28
+const WALL_REPEL_FORCE = 3.4
+const WALL_REPEL_EXPONENT = 5
 const MOUSE_REPEL_RADIUS = 88
 const MOUSE_REPEL_FORCE = 3.4
 const MOUSE_REPEL_GROWTH_PER_FRAME = 0.03
@@ -205,6 +210,31 @@ function v02PillSDF(
   return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0) - radius
 }
 
+function v02PillGradient(
+  x: number, y: number,
+  cx: number, cy: number, cw: number, ch: number,
+): [number, number] {
+  const halfW = cw * 0.5
+  const halfH = ch * 0.5
+  const radius = Math.min(halfW, halfH)
+  const ax = cx + radius
+  const ay = cy + halfH
+  const bx = cx + cw - radius
+  const by = cy + halfH
+  const spineX = bx - ax
+  const spineY = by - ay
+  const len2 = spineX * spineX + spineY * spineY
+  const t = len2 > 0
+    ? Math.max(0, Math.min(1, ((x - ax) * spineX + (y - ay) * spineY) / len2))
+    : 0
+  const nearestX = ax + t * spineX
+  const nearestY = ay + t * spineY
+  const gx = x - nearestX
+  const gy = y - nearestY
+  const len = Math.hypot(gx, gy)
+  return len > 0.001 ? [gx / len, gy / len] : [1, 0]
+}
+
 function v02HashCell(x: number, y: number, hashCellSize: number): string {
   return `${Math.floor(x / hashCellSize)},${Math.floor(y / hashCellSize)}`
 }
@@ -216,16 +246,27 @@ function v02QuarticFalloff(dist: number, radius: number): number {
   return u * u
 }
 
-function v02RandomPointInPill(cx: number, cy: number, cw: number, ch: number): { x: number; y: number } {
-  for (let i = 0; i < 24; i++) {
+function v02RandomPointInAnnulus(
+  cx: number, cy: number, cw: number, ch: number,
+  innerDepth: number,
+  outerMargin: number,
+): { x: number; y: number } {
+  const safeInnerDepth = Math.max(outerMargin + 1, innerDepth)
+  for (let i = 0; i < 48; i++) {
     const x = cx + Math.random() * cw
     const y = cy + Math.random() * ch
-    if (v02PillSDF(x, y, cx, cy, cw, ch) <= 0) return { x, y }
+    const sdf = v02PillSDF(x, y, cx, cy, cw, ch)
+    if (sdf < -outerMargin && sdf > -safeInnerDepth) return { x, y }
   }
-  return { x: cx + cw * 0.5, y: cy + ch * 0.5 }
+  const bandMid = (safeInnerDepth + outerMargin) * 0.5
+  return { x: cx + cw * 0.5, y: cy + bandMid }
 }
 
-function v02MakeDirectionalBoid(x: number, y: number, dirX: number, dirY: number, lifeCycleFrames: number): Boid {
+function v02MakeDirectionalBoid(
+  x: number, y: number,
+  dirX: number, dirY: number,
+  lifeCycleFrames: number,
+): Boid {
   const [nx, ny] = v02SetMag(dirX, dirY, 1)
   const signedAngle = (Math.random() * 2 - 1) * SPAWN_JITTER_ANGLE
   const [rx, ry] = v02Rotate(nx || 1, ny || 0, signedAngle)
@@ -248,11 +289,20 @@ function v02HctToRgb(hue: number, chroma: number, tone: number): [number, number
   return [redFromArgb(argb), greenFromArgb(argb), blueFromArgb(argb)]
 }
 
-function v02InitBoids(cx: number, cy: number, cw: number, ch: number, dirX: number, dirY: number, lifeCycleFrames: number): Boid[] {
+function v02InitBoids(
+  cx: number, cy: number, cw: number, ch: number,
+  lifeCycleFrames: number,
+  innerExclusionDepth: number,
+  spawnOuterMarginPx: number,
+): Boid[] {
   const boids: Boid[] = []
   for (let i = 0; i < INITIAL_BOIDS; i++) {
-    const pt = v02RandomPointInPill(cx, cy, cw, ch)
-    boids.push(v02MakeDirectionalBoid(pt.x, pt.y, dirX, dirY, lifeCycleFrames))
+    const pt = v02RandomPointInAnnulus(cx, cy, cw, ch, innerExclusionDepth, spawnOuterMarginPx)
+    const [gx, gy] = v02PillGradient(pt.x, pt.y, cx, cy, cw, ch)
+    const orbitSign = ORBIT_CLOCKWISE ? 1 : -1
+    const tangentX = -gy * orbitSign
+    const tangentY = gx * orbitSign
+    boids.push(v02MakeDirectionalBoid(pt.x, pt.y, tangentX, tangentY, lifeCycleFrames))
   }
   return boids
 }
@@ -298,7 +348,7 @@ function v02BuildSpatialHash(boids: Boid[], hashCellSize: number): Map<string, n
 function v02FlockAndFilter(
   boids: Boid[],
   cx: number, cy: number, cw: number, ch: number,
-  dirX: number, dirY: number,
+  innerExclusionDepth: number,
   speedScale: number,
   lx: number, ly: number,
   pointerDown: boolean,
@@ -338,7 +388,6 @@ function v02FlockAndFilter(
   const alignR2 = safeAlignRadius * safeAlignRadius
   const cohesionR2 = safeCohesionRadius * safeCohesionRadius
   const buckets = v02BuildSpatialHash(boids, safeHashCellSize)
-  const [flowVX, flowVY] = v02SetMag(dirX, dirY, maxSpeed)
   const mouseRepelScale = Math.min(
     1 + mouseDownFrames * MOUSE_REPEL_GROWTH_PER_FRAME,
     MOUSE_REPEL_CAP_MULTIPLIER,
@@ -416,10 +465,34 @@ function v02FlockAndFilter(
     b.alignStrength = v02Clamp01(algnCnt / 7)
     b.cohesionStrength = v02Clamp01(coheCnt / 7)
 
+    const sdf = v02PillSDF(b.x, b.y, cx, cy, cw, ch)
+    const [gx, gy] = v02PillGradient(b.x, b.y, cx, cy, cw, ch)
+    const orbitSign = ORBIT_CLOCKWISE ? 1 : -1
     {
-      const [fx, fy] = v02LimitMag(flowVX - b.vx, flowVY - b.vy, maxForce)
-      b.ax += fx * FLOW_WEIGHT
-      b.ay += fy * FLOW_WEIGHT
+      const tangentX = -gy * orbitSign
+      const tangentY = gx * orbitSign
+      const [tvx, tvy] = v02SetMag(tangentX, tangentY, maxSpeed)
+      const [fx, fy] = v02LimitMag(tvx - b.vx, tvy - b.vy, maxForce)
+      b.ax += fx * ORBIT_WEIGHT
+      b.ay += fy * ORBIT_WEIGHT
+    }
+    {
+      const innerThreshold = -innerExclusionDepth
+      if (sdf < innerThreshold) {
+        const excess = (innerThreshold - sdf) / Math.max(Math.abs(innerThreshold), 1)
+        const strength = excess * excess * INNER_REPEL_FORCE
+        b.ax += gx * strength
+        b.ay += gy * strength
+      }
+    }
+    {
+      const distToWall = -sdf
+      if (distToWall >= 0 && distToWall < WALL_REPEL_RANGE) {
+        const t = distToWall / WALL_REPEL_RANGE
+        const repelStrength = Math.exp(-t * WALL_REPEL_EXPONENT) * WALL_REPEL_FORCE
+        b.ax -= gx * repelStrength
+        b.ay -= gy * repelStrength
+      }
     }
 
     for (const sw of shockwaves) {
@@ -615,8 +688,9 @@ function v02SpawnUpToMinimum(
   boids: Boid[],
   minLiveBoids: number,
   cx: number, cy: number, cw: number, ch: number,
-  dirX: number, dirY: number,
   lifeCycleFrames: number,
+  innerExclusionDepth: number,
+  spawnOuterMarginPx: number,
 ) {
   const target = Math.min(Math.max(0, Math.floor(minLiveBoids)), MAX_BOIDS_HARD)
   if (boids.length > target) {
@@ -626,8 +700,12 @@ function v02SpawnUpToMinimum(
   if (boids.length >= target) return
   const toAdd = Math.min(SPAWN_BATCH_PER_FRAME, target - boids.length)
   for (let i = 0; i < toAdd; i++) {
-    const pt = v02RandomPointInPill(cx, cy, cw, ch)
-    boids.push(v02MakeDirectionalBoid(pt.x, pt.y, dirX, dirY, lifeCycleFrames))
+    const pt = v02RandomPointInAnnulus(cx, cy, cw, ch, innerExclusionDepth, spawnOuterMarginPx)
+    const [gx, gy] = v02PillGradient(pt.x, pt.y, cx, cy, cw, ch)
+    const orbitSign = ORBIT_CLOCKWISE ? 1 : -1
+    const tangentX = -gy * orbitSign
+    const tangentY = gx * orbitSign
+    boids.push(v02MakeDirectionalBoid(pt.x, pt.y, tangentX, tangentY, lifeCycleFrames))
   }
 }
 
@@ -678,6 +756,8 @@ export function createBoidSketch(
         v02BoidLength,
         v02BoidLineLength,
         v02EdgeVelocityMultiplier,
+        v02InnerExclusionDepth,
+        v02SpawnOuterMarginPx,
         v02CenterSpeed,
         v02LifeCycleFrames,
         v02SepRadius,
@@ -716,6 +796,8 @@ export function createBoidSketch(
 
       const cell11 = containerRects.get('1-1')
       if (!cell11 || cell11.w <= 0 || cell11.h <= 0) return
+      const innerExclusionDepth = Math.max(1, v02InnerExclusionDepth)
+      const spawnOuterMarginPx = Math.max(1, v02SpawnOuterMarginPx)
       ensureBoidBuffer(p.width, p.height)
       if (!boidBuffer) return
 
@@ -735,7 +817,15 @@ export function createBoidSketch(
       }
 
       if (!v02Initialized) {
-        v02Boids = v02InitBoids(cell11.x, cell11.y, cell11.w, cell11.h, activeDirX, activeDirY, v02LifeCycleFrames)
+        v02Boids = v02InitBoids(
+          cell11.x,
+          cell11.y,
+          cell11.w,
+          cell11.h,
+          v02LifeCycleFrames,
+          innerExclusionDepth,
+          spawnOuterMarginPx,
+        )
         v02Initialized = true
       }
 
@@ -752,14 +842,15 @@ export function createBoidSketch(
         v02Boids,
         minLiveBoids,
         cell11.x, cell11.y, cell11.w, cell11.h,
-        activeDirX, activeDirY,
         v02LifeCycleFrames,
+        innerExclusionDepth,
+        spawnOuterMarginPx,
       )
 
       v02Boids = v02FlockAndFilter(
         v02Boids,
         cell11.x, cell11.y, cell11.w, cell11.h,
-        activeDirX, activeDirY,
+        innerExclusionDepth,
         v02SpeedScale,
         lightPos.x, lightPos.y,
         pointerDown,

@@ -41,6 +41,10 @@ export interface V02SceneData extends SharedSceneData {
   v02BoidLength: number
   v02BoidLineLength: number
   v02EdgeVelocityMultiplier: number
+  /** Distance from wall into the pill where center exclusion begins (px). */
+  v02InnerExclusionDepth: number
+  /** Spawn margin from pill wall (px). */
+  v02SpawnOuterMarginPx: number
   v02SepRadius: number
   v02AlignRadius: number
   v02CohesionRadius: number
