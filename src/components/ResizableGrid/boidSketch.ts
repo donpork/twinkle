@@ -40,6 +40,7 @@ const BOID_CONSTANT_DIR_CHROMA_LIFT_MAX = 26
 const BOID_CONSTANT_SPEED_TONE_LIFT_MAX = 24
 const BOID_SEED_TONE = 5
 const BOID_PEAK_TONE = 75
+const RAW_PERTURBATION_HOVER_FLOOR = 0.08
 const PROXIMITY_LERP_UP = 0.06
 const PERTURBATION_BLEND_DISRUPTION = 0.72
 const PERTURBATION_BLEND_PROXIMITY = 0.28
@@ -553,7 +554,10 @@ function v02FlockAndFilter(
     }
 
     {
-      const raw = hasPointer ? v02QuarticFalloff(Math.hypot(b.x - lx, b.y - ly), mouseAttractRadius * 1.3) : 0
+      // Hover alone can contribute subtle perturbation even when pointer velocity is near zero.
+      const raw = hasPointer
+        ? v02QuarticFalloff(Math.hypot(b.x - lx, b.y - ly), mouseAttractRadius * 1.3)
+        : 0
       const proximityLerp = raw > b.proximityFraction ? PROXIMITY_LERP_UP : safeProximityLerpDown
       b.proximityFraction = v02Lerp(b.proximityFraction, raw, proximityLerp)
     }
@@ -591,9 +595,10 @@ function v02FlockAndFilter(
     }
 
     b.disruption = v02Clamp01(mouseDisruption)
-    const rawPerturbation = v02Clamp01(
+    let rawPerturbation = v02Clamp01(
       b.disruption * PERTURBATION_BLEND_DISRUPTION + b.proximityFraction * PERTURBATION_BLEND_PROXIMITY,
     )
+    if (hasPointer) rawPerturbation = Math.max(rawPerturbation, RAW_PERTURBATION_HOVER_FLOOR)
     const safeDecaySeconds = Math.max(0.001, mouseDecayRate)
     const decayPerFrame = 1 / (safeDecaySeconds * 60)
     b.perturbationDecay = v02Clamp01(Math.max(rawPerturbation, b.perturbationDecay - decayPerFrame))
@@ -633,7 +638,6 @@ function v02DrawAllBoids(
   targetSpeed: number,
   lx: number,
   ly: number,
-  mouseColorActive: boolean,
 ) {
   g.strokeWeight(Math.max(1, v02BoidLength))
   g.noFill()
@@ -651,7 +655,7 @@ function v02DrawAllBoids(
     const speed01 = v02Clamp01(speed / MAX_SPEED_BASE)
     const directionDot = v02Clamp01((ux * nx + uy * ny + 1) * 0.5) * 2 - 1
     const perturbation = b.perturbationDecay
-    const colorPerturbation = movementMode === 'isocontour' && !mouseColorActive ? 0 : perturbation
+    const colorPerturbation = perturbation
     const huePerturbation = Math.pow(colorPerturbation, 1.8)
     const adjustedHue = lx >= 0
       ? seedHct.hue + (Math.atan2(ly - b.y, lx - b.x) / Math.PI) * 28 * huePerturbation
@@ -933,7 +937,6 @@ export function createBoidSketch(
         .filter(sw => sw.radius < sw.maxRadius)
 
       boidBuffer.clear()
-      const mouseColorActive = mouseSpeed > mouseMinSpeed || pointerDown || shockwaves.length > 0
       v02DrawAllBoids(
         boidBuffer,
         v02Boids,
@@ -947,7 +950,6 @@ export function createBoidSketch(
         V02_FIXED_SPEED * v02SpeedScale,
         lightPos.x,
         lightPos.y,
-        mouseColorActive,
       )
 
       p.clear()
