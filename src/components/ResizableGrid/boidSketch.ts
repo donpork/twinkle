@@ -18,7 +18,7 @@ const ORBIT_CLOCKWISE = true
 const ORBIT_WEIGHT = 0.65
 const FLOW_WEIGHT = 0.4
 const INNER_REPEL_FORCE = 1.25
-const WALL_REPEL_RANGE = 28
+const WALL_REPEL_RANGE = 10
 const WALL_REPEL_FORCE = 3.4
 const WALL_REPEL_EXPONENT = 5
 const MOUSE_REPEL_RADIUS = 88
@@ -32,14 +32,18 @@ const V01_COLOR_SMOOTH_ALPHA_DECAY = 0.28
 const V02_FIXED_SPEED = MAX_SPEED_BASE * 0.96
 const MAX_NEIGHBORS_PER_BOID = 36
 const POINTER_CENTER_DEADZONE = 0.28
-const BOID_CHROMA_SHIFT_MAX = 20
-const BOID_TONE_SHIFT_MAX = 12
-const BOID_DISRUPTION_TONE_BOOST_MAX = 42
-const BOID_CONSTANT_DIR_TONE_LIFT_MAX = 30
-const BOID_CONSTANT_DIR_CHROMA_LIFT_MAX = 26
-const BOID_CONSTANT_SPEED_TONE_LIFT_MAX = 24
-const BOID_SEED_TONE = 5
-const BOID_PEAK_TONE = 75
+const BOID_PEAK_TONE = 90
+const REST_TONE = 5
+const REST_CHROMA_SCALE = 0.4
+const REST_CHROMA_FLOOR = 6
+const HUE_ACTIVITY_THRESHOLD = 0.18
+const LOCAL_HOVER_TONE_LIFT = 10
+const LOCAL_ACTIVITY_TONE_BOOST = 85
+const LOCAL_HOVER_CHROMA_LIFT = 6
+const LOCAL_ACTIVITY_CHROMA_BOOST = 65
+const DECAY_CHROMA_BOOST = 18
+const LOCAL_HUE_SHIFT_MAX = 20
+const CHROMA_ABSOLUTE_CAP = 90
 const RAW_PERTURBATION_HOVER_FLOOR = 0.08
 const PROXIMITY_LERP_UP = 0.06
 const PERTURBATION_BLEND_DISRUPTION = 0.72
@@ -631,72 +635,44 @@ function v02DrawAllBoids(
   v02BoidLength: number,
   v02BoidLineLength: number,
   themeSeedHex: string,
-  movementMode: V02MovementMode,
-  flowDirX: number,
-  flowDirY: number,
-  constantSpeedMode: boolean,
-  targetSpeed: number,
   lx: number,
   ly: number,
+  mouseActivityIntensity: number,
 ) {
   g.strokeWeight(Math.max(1, v02BoidLength))
   g.noFill()
   const safeLineLength = Math.max(1, v02BoidLineLength)
   const seedHct = Hct.fromInt(argbFromHex(themeSeedHex))
-  const [nx, ny] = v02SetMag(flowDirX, flowDirY, 1)
 
   for (const b of boids) {
     const speed = Math.hypot(b.vx, b.vy)
-    const lineLen = Math.max(1, speed * safeLineLength)
+    const lineLen = Math.max(1.3, speed * safeLineLength)
     const ux = b.headingX
     const uy = b.headingY
     const hx = ux * lineLen * 0.5
     const hy = uy * lineLen * 0.5
-    const speed01 = v02Clamp01(speed / MAX_SPEED_BASE)
-    const directionDot = v02Clamp01((ux * nx + uy * ny + 1) * 0.5) * 2 - 1
-    const perturbation = b.perturbationDecay
-    const colorPerturbation = perturbation
-    const huePerturbation = Math.pow(colorPerturbation, 1.8)
-    const adjustedHue = lx >= 0
-      ? seedHct.hue + (Math.atan2(ly - b.y, lx - b.x) / Math.PI) * 28 * huePerturbation
-      : seedHct.hue
-    const targetColor = movementMode === 'isocontour'
-      ? (() => {
-          const tone = Math.min(BOID_PEAK_TONE, BOID_SEED_TONE + colorPerturbation * BOID_DISRUPTION_TONE_BOOST_MAX)
-          const chroma = seedHct.chroma + colorPerturbation * BOID_CONSTANT_DIR_CHROMA_LIFT_MAX
-          return v02HctToRgb(adjustedHue, chroma, tone)
-        })()
-      : constantSpeedMode
-      ? (() => {
-          const angleDelta01 = v02Clamp01((1 - directionDot) * 0.5)
-          const speedDelta01 = targetSpeed > 0.001
-            ? v02Clamp01(Math.abs(speed - targetSpeed) / targetSpeed)
-            : 0
-          const toneLift =
-            angleDelta01 * BOID_CONSTANT_DIR_TONE_LIFT_MAX
-            + speedDelta01 * BOID_CONSTANT_SPEED_TONE_LIFT_MAX
-            + perturbation * BOID_DISRUPTION_TONE_BOOST_MAX
-          const tone = Math.min(BOID_PEAK_TONE, BOID_SEED_TONE + toneLift)
-          const chromaLift = angleDelta01 * BOID_CONSTANT_DIR_CHROMA_LIFT_MAX
-          return v02HctToRgb(
-            adjustedHue,
-            seedHct.chroma + chromaLift,
-            tone,
-          )
-        })()
-      : (() => {
-          const chromaShiftRaw = (speed01 - 0.5) * (BOID_CHROMA_SHIFT_MAX * 2) + (b.alignStrength - b.sepStrength) * 8
-          const chromaShift = Math.max(-BOID_CHROMA_SHIFT_MAX, Math.min(BOID_CHROMA_SHIFT_MAX, chromaShiftRaw))
-          const toneShiftRaw = (speed01 - 0.5) * (BOID_TONE_SHIFT_MAX * 2) + b.cohesionStrength * 4 * b.perturbationDecay
-          const toneShiftBase = Math.max(-BOID_TONE_SHIFT_MAX, Math.min(BOID_TONE_SHIFT_MAX, toneShiftRaw))
-          const toneShift = toneShiftBase + perturbation * BOID_DISRUPTION_TONE_BOOST_MAX
-          const tone = Math.min(BOID_PEAK_TONE, BOID_SEED_TONE + toneShift)
-          return v02HctToRgb(
-            adjustedHue,
-            seedHct.chroma + chromaShift,
-            tone,
-          )
-        })()
+    const colorPerturbation = b.perturbationDecay
+    const activityForLuminance = mouseActivityIntensity * mouseActivityIntensity
+    const hueRamp = v02Clamp01((mouseActivityIntensity - HUE_ACTIVITY_THRESHOLD) / (1 - HUE_ACTIVITY_THRESHOLD))
+    const activityForHue = hueRamp * hueRamp
+    const p = colorPerturbation
+    const restChroma = Math.max(seedHct.chroma * REST_CHROMA_SCALE, REST_CHROMA_FLOOR)
+    const hoverLift = b.proximityFraction * LOCAL_HOVER_TONE_LIFT
+    const activityLift = p * activityForLuminance * b.proximityFraction * LOCAL_ACTIVITY_TONE_BOOST
+    const tone = Math.min(BOID_PEAK_TONE, REST_TONE + hoverLift + activityLift)
+    const chromaSignal = Math.max(p, activityForLuminance) * b.proximityFraction
+    const chromaDrive = Math.pow(chromaSignal, 0.6)
+    const hueSignal = Math.max(p, activityForHue) * b.proximityFraction
+    const hueDrive = Math.pow(hueSignal, 0.6)
+    const decayChroma = p * DECAY_CHROMA_BOOST
+    const hoverChroma = b.proximityFraction * LOCAL_HOVER_CHROMA_LIFT
+    const activityChroma = chromaDrive * LOCAL_ACTIVITY_CHROMA_BOOST
+    const chroma = Math.min(restChroma + decayChroma + hoverChroma + activityChroma, CHROMA_ABSOLUTE_CAP)
+    const hueShift = lx >= 0
+      ? (Math.atan2(ly - b.y, lx - b.x) / Math.PI) * LOCAL_HUE_SHIFT_MAX * hueDrive
+      : 0
+    const adjustedHue = seedHct.hue + hueShift
+    const targetColor = v02HctToRgb(adjustedHue, chroma, tone)
 
     if (b.colorR < 0) {
       b.colorR = targetColor[0]
@@ -845,6 +821,14 @@ export function createBoidSketch(
 
       const cell11 = containerRects.get('1-1')
       if (!cell11 || cell11.w <= 0 || cell11.h <= 0) return
+      const pointerInsidePill =
+        lightPos.x >= 0
+        && lightPos.y >= 0
+        && v02PillSDF(lightPos.x, lightPos.y, cell11.x, cell11.y, cell11.w, cell11.h) <= 0
+      const effectLx = pointerInsidePill ? lightPos.x : -1
+      const effectLy = pointerInsidePill ? lightPos.y : -1
+      const ACTIVITY_SPEED_SCALE = 5
+      const mouseActivityIntensity = pointerInsidePill ? v02Clamp01(mouseSpeed / ACTIVITY_SPEED_SCALE) : 0
       const innerExclusionDepth = Math.max(1, v02InnerExclusionDepth)
       const spawnOuterMarginPx = Math.max(1, v02SpawnOuterMarginPx)
       ensureBoidBuffer(p.width, p.height)
@@ -854,10 +838,10 @@ export function createBoidSketch(
       if (pointerDown) v02MouseDownFrames++
       else v02MouseDownFrames = 0
       const justClicked = pointerDown && !wasDown
-      if (justClicked && lightPos.x >= 0 && lightPos.y >= 0) {
+      if (justClicked && pointerInsidePill) {
         shockwaves.push({
-          x: lightPos.x,
-          y: lightPos.y,
+          x: effectLx,
+          y: effectLy,
           radius: 0,
           maxRadius: SHOCKWAVE_MAX_RADIUS,
           strength: SHOCKWAVE_STRENGTH,
@@ -909,7 +893,7 @@ export function createBoidSketch(
         activeDirX, activeDirY,
         innerExclusionDepth,
         v02SpeedScale,
-        lightPos.x, lightPos.y,
+        effectLx, effectLy,
         pointerDown,
         v02MouseDownFrames,
         shockwaves,
@@ -943,13 +927,9 @@ export function createBoidSketch(
         v02BoidLength,
         v02BoidLineLength,
         themeSeedHex,
-        v02MovementMode,
-        activeDirX,
-        activeDirY,
-        v02ConstantSpeedAtCenter,
-        V02_FIXED_SPEED * v02SpeedScale,
-        lightPos.x,
-        lightPos.y,
+        effectLx,
+        effectLy,
+        mouseActivityIntensity,
       )
 
       p.clear()
