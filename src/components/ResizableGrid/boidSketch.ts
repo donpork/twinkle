@@ -21,6 +21,9 @@ const INNER_REPEL_FORCE = 1.25
 const WALL_REPEL_RANGE = 10
 const WALL_REPEL_FORCE = 3.4
 const WALL_REPEL_EXPONENT = 5
+const BLAST_SPEED = 22
+const BLAST_FRAMES = 10
+const BLAST_TWIST = 0.3
 const MOUSE_REPEL_RADIUS = 88
 const MOUSE_REPEL_FORCE = 3.4
 const MOUSE_REPEL_GROWTH_PER_FRAME = 0.03
@@ -48,11 +51,6 @@ const RAW_PERTURBATION_HOVER_FLOOR = 0.08
 const PROXIMITY_LERP_UP = 0.06
 const PERTURBATION_BLEND_DISRUPTION = 0.72
 const PERTURBATION_BLEND_PROXIMITY = 0.28
-const SHOCKWAVE_MAX_RADIUS = 200
-const SHOCKWAVE_STRENGTH = 20
-const SHOCKWAVE_THICKNESS = 30
-const SHOCKWAVE_EXPAND_SPEED = 40
-const SHOCKWAVE_TWIST_RANGE = 0.4
 const HEADING_LERP = 0.18
 
 
@@ -162,15 +160,7 @@ interface Boid {
   colorR: number
   colorG: number
   colorB: number
-}
-
-interface Shockwave {
-  x: number
-  y: number
-  radius: number
-  maxRadius: number
-  strength: number
-  age: number
+  blastFrames: number
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +286,7 @@ function v02MakeDirectionalBoid(
     headingX: rx, headingY: ry,
     sepStrength: 0, alignStrength: 0, cohesionStrength: 0,
     colorR: -1, colorG: -1, colorB: -1,
+    blastFrames: 0,
   }
 }
 
@@ -378,7 +369,6 @@ function v02FlockAndFilter(
   lx: number, ly: number,
   pointerDown: boolean,
   mouseDownFrames: number,
-  shockwaves: readonly Shockwave[],
   deathDistancePx: number,
   sepRadius: number,
   alignRadius: number,
@@ -527,24 +517,6 @@ function v02FlockAndFilter(
       b.ay += fy * FLOW_WEIGHT
     }
 
-    for (const sw of shockwaves) {
-      const dx = b.x - sw.x
-      const dy = b.y - sw.y
-      const dist = Math.hypot(dx, dy)
-      if (dist <= 0.1) continue
-      const distFromFront = Math.abs(dist - sw.radius)
-      if (distFromFront >= SHOCKWAVE_THICKNESS) continue
-      const waveFalloff = 1 - distFromFront / SHOCKWAVE_THICKNESS
-      const decayFactor = 1 - sw.age / (sw.maxRadius / SHOCKWAVE_EXPAND_SPEED)
-      const force = sw.strength * waveFalloff * Math.max(0, decayFactor)
-      mouseDisruption = Math.max(mouseDisruption, waveFalloff * Math.max(0, decayFactor))
-      const tx = -dy / dist
-      const ty = dx / dist
-      const twist = (Math.random() - 0.5) * SHOCKWAVE_TWIST_RANGE
-      b.ax += ((dx / dist) + tx * twist) * force
-      b.ay += ((dy / dist) + ty * twist) * force
-    }
-
     if (hasPointer && pointerDown) {
       const dx = b.x - lx
       const dy = b.y - ly
@@ -610,10 +582,16 @@ function v02FlockAndFilter(
 
   const alive: Boid[] = []
   for (const b of boids) {
-    b.vx += b.ax
-    b.vy += b.ay
-    ;[b.vx, b.vy] = v02LimitMag(b.vx, b.vy, maxSpeed)
-    ;[b.vx, b.vy] = v02SetMag(b.vx, b.vy, V02_FIXED_SPEED * speedScale)
+    if (b.blastFrames > 0) {
+      b.blastFrames--
+      b.vx *= 0.82
+      b.vy *= 0.82
+    } else {
+      b.vx += b.ax
+      b.vy += b.ay
+      ;[b.vx, b.vy] = v02LimitMag(b.vx, b.vy, maxSpeed)
+      ;[b.vx, b.vy] = v02SetMag(b.vx, b.vy, V02_FIXED_SPEED * speedScale)
+    }
     const spd = Math.hypot(b.vx, b.vy)
     if (spd > 0.001) {
       b.headingX = v02Lerp(b.headingX, b.vx / spd, HEADING_LERP)
@@ -743,7 +721,6 @@ export function createBoidSketch(
 ) {
   return (p: p5) => {
     let v02Boids: Boid[] = []
-    let shockwaves: Shockwave[] = []
     let v02Initialized = false
     let boidBuffer: p5.Graphics | null = null
     let boidPostShaderV02: p5.Shader | null = null
@@ -783,6 +760,7 @@ export function createBoidSketch(
         v02EdgeVelocityMultiplier,
         v02InnerExclusionDepth,
         v02SpawnOuterMarginPx,
+        v02BlastRadius,
         v02CenterSpeed,
         v02LifeCycleFrames,
         v02SepRadius,
@@ -831,6 +809,7 @@ export function createBoidSketch(
       const mouseActivityIntensity = pointerInsidePill ? v02Clamp01(mouseSpeed / ACTIVITY_SPEED_SCALE) : 0
       const innerExclusionDepth = Math.max(1, v02InnerExclusionDepth)
       const spawnOuterMarginPx = Math.max(1, v02SpawnOuterMarginPx)
+      const blastRadius = Math.max(1, v02BlastRadius ?? 130)
       ensureBoidBuffer(p.width, p.height)
       if (!boidBuffer) return
 
@@ -838,15 +817,24 @@ export function createBoidSketch(
       if (pointerDown) v02MouseDownFrames++
       else v02MouseDownFrames = 0
       const justClicked = pointerDown && !wasDown
+
       if (justClicked && pointerInsidePill) {
-        shockwaves.push({
-          x: effectLx,
-          y: effectLy,
-          radius: 0,
-          maxRadius: SHOCKWAVE_MAX_RADIUS,
-          strength: SHOCKWAVE_STRENGTH,
-          age: 0,
-        })
+        for (const b of v02Boids) {
+          const dx = b.x - effectLx
+          const dy = b.y - effectLy
+          const dist = Math.hypot(dx, dy)
+          if (dist > blastRadius || dist < 0.1) continue
+          const falloff = 1 - (dist / blastRadius) ** 2
+          const nx = dx / dist
+          const ny = dy / dist
+          const tx = -ny
+          const ty = nx
+          const [outX, outY] = v02SetMag(nx + tx * BLAST_TWIST, ny + ty * BLAST_TWIST, 1)
+          b.vx = outX * BLAST_SPEED * falloff
+          b.vy = outY * BLAST_SPEED * falloff
+          b.blastFrames = Math.round(BLAST_FRAMES * falloff)
+          b.perturbationDecay = 1.0
+        }
       }
 
       if (!v02Initialized) {
@@ -896,7 +884,6 @@ export function createBoidSketch(
         effectLx, effectLy,
         pointerDown,
         v02MouseDownFrames,
-        shockwaves,
         deathDistancePx,
         v02SepRadius,
         v02AlignRadius,
@@ -915,10 +902,6 @@ export function createBoidSketch(
         mouseDecayRate,
         mouseProximityLerpDown,
       )
-
-      shockwaves = shockwaves
-        .map(sw => ({ ...sw, radius: sw.radius + SHOCKWAVE_EXPAND_SPEED, age: sw.age + 1 }))
-        .filter(sw => sw.radius < sw.maxRadius)
 
       boidBuffer.clear()
       v02DrawAllBoids(

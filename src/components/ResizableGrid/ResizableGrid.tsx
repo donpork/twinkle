@@ -78,6 +78,7 @@ export function ResizableGrid() {
   const [v02EdgeVelocityMultiplier, setV02EdgeVelocityMultiplier] = useState(0)
   const [v02InnerExclusionDepth, setV02InnerExclusionDepth] = useState(200)
   const [v02SpawnOuterMarginPx, setV02SpawnOuterMarginPx] = useState(2)
+  const [v02BlastRadius, setV02BlastRadius] = useState(130)
   const [v02SepRadius, setV02SepRadius] = useState(80)
   const [v02AlignRadius, setV02AlignRadius] = useState(44)
   const [v02CohesionRadius, setV02CohesionRadius] = useState(60)
@@ -117,8 +118,9 @@ export function ResizableGrid() {
     v02BoidLineLength: 6,
     v02MovementMode: 'isocontour',
     v02EdgeVelocityMultiplier: 0,
-    v02InnerExclusionDepth: 200,
-    v02SpawnOuterMarginPx: 2,
+    v02InnerExclusionDepth: 300,
+    v02SpawnOuterMarginPx: 20,
+    v02BlastRadius: 200,
     v02SepRadius: 80,
     v02AlignRadius: 44,
     v02CohesionRadius: 60,
@@ -136,23 +138,23 @@ export function ResizableGrid() {
     mouseAttractRadius: 180,
     mouseAlignWeight: 2,
     mouseAttractWeight: 5,
-    mouseAccelSensitivity: 3.5,
+    mouseAccelSensitivity: 2,
     mouseMinSpeed: 0.3,
-    mouseDecayRate: 0.1,
-    mouseProximityLerpDown: 0.08,
+    mouseDecayRate: 1.0,
+    mouseProximityLerpDown: 0.1,
   })
 
   // ---- Mouse influence controls ----
   const [mouseAlignRadius, setMouseAlignRadius] = useState(160)
   const [mouseAttractRadius, setMouseAttractRadius] = useState(180)
   const [mouseAlignWeight, setMouseAlignWeight] = useState(2)
-  const [mouseAttractWeight, setMouseAttractWeight] = useState(5)
-  const [mouseAccelSensitivity, setMouseAccelSensitivity] = useState(3.5)
+  const [mouseAttractWeight, setMouseAttractWeight] = useState(4)
+  const [mouseAccelSensitivity, setMouseAccelSensitivity] = useState(2)
   const [mouseMinSpeed, setMouseMinSpeed] = useState(0.3)
   const [mouseDecayRate, setMouseDecayRate] = useState(0.1)
-  const [mouseProximityLerpDown, setMouseProximityLerpDown] = useState(0.08)
+  const [mouseProximityLerpDown, setMouseProximityLerpDown] = useState(0.1)
   const [mouseDecayRateInput, setMouseDecayRateInput] = useState('0.1')
-  const [mouseProximityLerpDownInput, setMouseProximityLerpDownInput] = useState('0.08')
+  const [mouseProximityLerpDownInput, setMouseProximityLerpDownInput] = useState('0.1')
 
   // Active drag state (stored in ref to avoid re-renders during pointermove).
   const dragRef = useRef<DragState | null>(null)
@@ -498,6 +500,12 @@ export function ResizableGrid() {
     const v = Math.max(1, Number(e.target.value))
     setV02SpawnOuterMarginPx(v)
     v02DataRef.current.v02SpawnOuterMarginPx = v
+  }
+
+  function handleV02BlastRadiusChange(e: ChangeEvent<HTMLInputElement>) {
+    const v = Math.max(1, Number(e.target.value))
+    setV02BlastRadius(v)
+    v02DataRef.current.v02BlastRadius = v
   }
 
   function handleV02SepRadiusChange(e: ChangeEvent<HTMLInputElement>) {
@@ -953,6 +961,20 @@ export function ResizableGrid() {
                 />
               </label>
             ) : null}
+            <label
+              className="resizable-grid__control-row"
+              title="Radius in pixels of the immediate click blast impulse."
+            >
+              blast radius
+              <input
+                type="number"
+                min={1}
+                max={800}
+                step={1}
+                value={v02BlastRadius}
+                onChange={handleV02BlastRadiusChange}
+              />
+            </label>
             <label
               className="resizable-grid__control-row"
               title="Minimum speed scale when the cursor sits near the cell center; blends with edge speed toward the rim."

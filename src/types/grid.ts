@@ -47,6 +47,8 @@ export interface V02SceneData extends SharedSceneData {
   v02InnerExclusionDepth: number
   /** Spawn margin from pill wall (px). */
   v02SpawnOuterMarginPx: number
+  /** Click-blast radius in pixels. */
+  v02BlastRadius: number
   v02SepRadius: number
   v02AlignRadius: number
   v02CohesionRadius: number
